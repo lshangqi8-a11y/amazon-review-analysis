@@ -58,7 +58,7 @@ python "$SKILL_ROOT\scripts\step1_prepare_extract.py" --input ".\reviews.xlsx" -
 # …按下方步骤由 Agent 填写 MODEL_OUTPUT.json 后继续…
 ```
 
-### 1) Python：准备提炼批次（每批最多 200 条）
+### 1) Python：准备提炼批次（每批最多 50 条）
 
 ```bash
 python "$SKILL_ROOT/scripts/step1_prepare_extract.py" \
@@ -119,7 +119,7 @@ python "$SKILL_ROOT/scripts/step4_finalize.py" \
 - 键：类型 + 标准维度（具体维度 = 标准维度）  
 - 提及评论数：该维度对应的不同评论数（同评论同维度最多计 1）  
 - 提及频率：提及评论数 / **上传评论总数** × 100%（空评、`items=[]` 计入分母）  
-- 代表性反馈：从模块1真实「单条提炼」取最多 3 条，不改写，去重，优先不同评论，按原表顺序，用「；」拼接
+- 代表性反馈：从模块1真实「单条提炼」取最多 5 条，不改写，去重，优先不同评论，按原表顺序，用「；」拼接
 
 ## 硬约束
 
