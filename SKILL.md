@@ -32,7 +32,7 @@ ASIN 若存在于原表，仅保留原列，不参与分组/统计。
 
 ## 分工
 
-- **AI（Agent 当前模型）**：`提炼`、`维度归一`（reasoning 关闭）
+- **AI（Agent 当前模型）**：`提炼`、`维度归一`（reasoning 关闭；归一偏合并、可审阅粒度）
 - **Python**：读表、拼 `review_text`、校验 JSON、统计、写 Excel
 
 ## 六类一级类型（固定）
