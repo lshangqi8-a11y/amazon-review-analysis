@@ -224,7 +224,12 @@ def write_analysis_workbook(
     for r in range(2, ws_sum.max_row + 1):
         ws_sum.cell(row=r, column=4).number_format = "0.00%"
 
-    for idx, width in enumerate([12, 18, 28, 12, 48], start=1):
+    # Reviewability: freeze header + auto filter (sort already by 类型 → 提及数)
+    ws_sum.freeze_panes = "A2"
+    if ws_sum.max_row >= 1:
+        ws_sum.auto_filter.ref = f"A1:E{ws_sum.max_row}"
+
+    for idx, width in enumerate([12, 18, 14, 12, 56], start=1):
         ws_sum.column_dimensions[get_column_letter(idx)].width = width
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

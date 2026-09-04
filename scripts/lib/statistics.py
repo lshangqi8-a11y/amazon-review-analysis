@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .constants import REPRESENTATIVE_FEEDBACK_LIMIT
+from .constants import REPRESENTATIVE_FEEDBACK_LIMIT, VOC_TYPES
+
+_TYPE_ORDER = {name: idx for idx, name in enumerate(VOC_TYPES)}
 
 
 def pick_representative_feedback(items: list[dict], *, max_n: int = REPRESENTATIVE_FEEDBACK_LIMIT) -> str:
@@ -25,6 +27,11 @@ def pick_representative_feedback(items: list[dict], *, max_n: int = REPRESENTATI
 
 
 def aggregate_statistics(items: list[dict], total_reviews: int) -> list[dict]:
+    """
+    Output order for reviewability:
+    消费人群 → 产品用途 → 使用场景 → 购买动机 → 用户满意 → 用户不满
+    within each type: mention_count desc, then dimension name.
+    """
     pairs = defaultdict(set)
     items_by_std: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for it in items:
@@ -53,5 +60,11 @@ def aggregate_statistics(items: list[dict], total_reviews: int) -> list[dict]:
                 "representative_feedback": feedback,
             }
         )
-    rows.sort(key=lambda x: (-int(x["mention_count"]), x["item_type"], x["dimension"]))
+    rows.sort(
+        key=lambda x: (
+            _TYPE_ORDER.get(x["item_type"], 999),
+            -int(x["mention_count"]),
+            x["dimension"] or "",
+        )
+    )
     return rows
