@@ -14,6 +14,8 @@ from openpyxl.utils import get_column_letter
 
 from .constants import (
     ANALYSIS_SHEET_NAMES,
+    MODULE_DESCRIPTIONS,
+    NEED_FULFILLMENT_SECTION_DESC,
     OVERVIEW_MIN_MENTIONS,
     OVERVIEW_SHEET_NAME,
     OVERVIEW_TOP_N,
@@ -452,8 +454,22 @@ def _write_portrait_module(
         start_row=card_row,
         start_column=card_col_start,
         end_row=card_row,
-        end_column=min(card_col_start + 3, card_col_end),
+        end_column=min(card_col_start + 7, card_col_end),
     )
+
+    desc = MODULE_DESCRIPTIONS.get(item_type) or ""
+    desc_cell = ws.cell(row=card_row + 1, column=card_col_start, value=desc)
+    desc_cell.font = Font(name="Microsoft YaHei", size=8, color="666666")
+    desc_cell.alignment = Alignment(wrap_text=True, vertical="top")
+    desc_cell.fill = _CARD_FILL
+    ws.merge_cells(
+        start_row=card_row + 1,
+        start_column=card_col_start,
+        end_row=card_row + 1,
+        end_column=card_col_end,
+    )
+    ws.row_dimensions[card_row + 1].height = 28
+
     top_rows = _top_rows_for_type(
         summary_rows or [],
         item_type,
@@ -463,7 +479,7 @@ def _write_portrait_module(
     sub_text = f"主维度（提及≥{OVERVIEW_MIN_MENTIONS}）· 共 {len(top_rows)} 项 · 提及频率"
     if top_n is not None:
         sub_text = f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · 提及频率"
-    sub = ws.cell(row=card_row + 1, column=card_col_start, value=sub_text)
+    sub = ws.cell(row=card_row + 2, column=card_col_start, value=sub_text)
     sub.font = Font(name="Microsoft YaHei", size=9, color="808080")
     sub.fill = _CARD_FILL
 
@@ -500,7 +516,8 @@ def _write_portrait_module(
         chart_title = f"{display}（{len(top_rows)}）"
     else:
         chart_title = f"{display} TOP {top_n}"
-    anchor = f"{get_column_letter(card_col_start)}{card_row + 2}"
+    # Chart below title + description + meta line
+    anchor = f"{get_column_letter(card_col_start)}{card_row + 3}"
     y_max = max(float(item.get("mention_rate") or 0) / 100.0 for item in top_rows)
     _add_portrait_column_chart(
         ws,
@@ -561,6 +578,20 @@ def _write_feedback_panel(
     ws.merge_cells(start_row=start_row, start_column=dim_c, end_row=start_row, end_column=fb_end)
     ws.row_dimensions[start_row].height = 22
 
+    desc = MODULE_DESCRIPTIONS.get(item_type) or ""
+    desc_cell = ws.cell(row=start_row + 1, column=dim_c, value=desc)
+    desc_cell.font = Font(name="Microsoft YaHei", size=8, color="666666")
+    desc_cell.alignment = Alignment(wrap_text=True, vertical="center")
+    for c in range(dim_c, fb_end + 1):
+        ws.cell(row=start_row + 1, column=c).fill = PatternFill("solid", fgColor="FAFAFA")
+    ws.merge_cells(
+        start_row=start_row + 1,
+        start_column=dim_c,
+        end_row=start_row + 1,
+        end_column=fb_end,
+    )
+    ws.row_dimensions[start_row + 1].height = 26
+
     top_rows = _top_rows_for_type(
         summary_rows or [],
         item_type,
@@ -568,15 +599,15 @@ def _write_feedback_panel(
         min_mentions=OVERVIEW_MIN_MENTIONS,
     )
     if not top_rows:
-        r = start_row + 2
+        r = start_row + 3
         cell = ws.cell(row=r, column=dim_c, value="暂无足够评论证据")
         cell.font = _EMPTY_FONT
         ws.merge_cells(start_row=r, start_column=dim_c, end_row=r, end_column=fb_end)
-        return 3
+        return 4
 
-    bar_start_row = start_row + 1
+    bar_start_row = start_row + 2
     for i, item in enumerate(top_rows):
-        r = start_row + 1 + i
+        r = start_row + 2 + i
         ws.row_dimensions[r].height = 48
         dim = str(item.get("dimension") or "")
         dim_cell = ws.cell(row=r, column=dim_c, value=dim)
@@ -602,10 +633,10 @@ def _write_feedback_panel(
         for c in range(dim_c, fb_end + 1):
             ws.cell(row=r, column=c).border = Border(bottom=Side(style="hair", color="E0E0E0"))
 
-    bar_end_row = start_row + len(top_rows)
+    bar_end_row = start_row + 1 + len(top_rows)
     col_letter = get_column_letter(bar_c)
     _apply_databar(ws, f"{col_letter}{bar_start_row}:{col_letter}{bar_end_row}", databar_color)
-    return 1 + len(top_rows)
+    return 2 + len(top_rows)
 
 
 def _build_overview_sheet(
@@ -743,7 +774,7 @@ def _build_overview_sheet(
     sec = ws.cell(
         row=feedback_label_row,
         column=1,
-        value="需求满足分析（用户满意 / 未被满足；与消费者画像分开阅读）",
+        value="需求满足分析（用户满意 / 未被满足）",
     )
     sec.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
     ws.merge_cells(
@@ -752,7 +783,21 @@ def _build_overview_sheet(
         end_row=feedback_label_row,
         end_column=19,
     )
-    panel_start = feedback_label_row + 1
+    sec_desc = ws.cell(
+        row=feedback_label_row + 1,
+        column=1,
+        value=NEED_FULFILLMENT_SECTION_DESC,
+    )
+    sec_desc.font = Font(name="Microsoft YaHei", size=8, color="666666")
+    sec_desc.alignment = Alignment(wrap_text=True)
+    ws.merge_cells(
+        start_row=feedback_label_row + 1,
+        start_column=1,
+        end_row=feedback_label_row + 1,
+        end_column=19,
+    )
+    ws.row_dimensions[feedback_label_row + 1].height = 24
+    panel_start = feedback_label_row + 2
 
     left_rows = _write_feedback_panel(
         ws,

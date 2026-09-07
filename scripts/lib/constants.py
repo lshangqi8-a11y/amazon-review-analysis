@@ -24,6 +24,18 @@ OVERVIEW_MIN_MENTIONS = 2
 TYPE_DISPLAY_LABELS = {
     "用户不满": "未被满足",
 }
+# Overview module blurbs (consumer persona + need fulfillment)
+MODULE_DESCRIPTIONS = {
+    "消费人群": "分析评论中提及的主要用户类型，以及不同消费人群中的提及占比。",
+    "产品用途": "分析评论中提及的产品用途和使用任务，以及不同用途上的提及占比。",
+    "使用场景": "分析评论中提及的产品使用环境，以及不同场景中的提及占比。",
+    "购买动机": "分析用户购买产品的主要原因，以及不同购买动机上的提及占比。",
+    "用户满意": "汇总评论中的正面体验及其提及占比，快速识别产品优势。",
+    "用户不满": "汇总评论中的负面体验及其提及占比，快速识别核心问题与改进方向。",
+}
+NEED_FULFILLMENT_SECTION_DESC = (
+    "汇总本品评论中的正面与负面体验及其提及占比，快速识别产品优势、核心问题和改进方向。"
+)
 ANALYSIS_SHEET_NAMES = (
     OVERVIEW_SHEET_NAME,
     RESULT_SHEET_NAME,
