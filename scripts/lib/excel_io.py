@@ -14,7 +14,10 @@ from .constants import (
     ANALYSIS_SHEET_NAMES,
     OVERVIEW_SHEET_NAME,
     OVERVIEW_TOP_N,
+    PRODUCT_CATEGORY_HEADER_CANDIDATES,
+    PRODUCT_NAME_HEADER_CANDIDATES,
     RESULT_SHEET_NAME,
+    TYPE_DISPLAY_LABELS,
     VOC_TYPES,
 )
 TITLE_HEADER_CANDIDATES = [
@@ -217,9 +220,53 @@ _THIN = Border(
 )
 
 
-def _display_or_dash(value) -> str:
-    text = str(value or "").strip()
-    return text if text else "-"
+def type_display_label(item_type: str) -> str:
+    t = (item_type or "").strip()
+    return TYPE_DISPLAY_LABELS.get(t, t)
+
+
+def guess_product_fields(
+    path: str | Path,
+    sheet_name: str,
+) -> tuple[str, str]:
+    """
+    Optionally read a single reliable product_name / product_category from Excel.
+    Returns ("", "") when not reliably available. No AI.
+    """
+    headers = read_headers(path, sheet_name)
+    name_col = _guess_column(headers, PRODUCT_NAME_HEADER_CANDIDATES)
+    cat_col = _guess_column(
+        headers,
+        PRODUCT_CATEGORY_HEADER_CANDIDATES,
+        exclude={name_col} if name_col else set(),
+    )
+    if not name_col and not cat_col:
+        return "", ""
+
+    name_idx = headers.index(name_col) if name_col else None
+    cat_idx = headers.index(cat_col) if cat_col else None
+    names: set[str] = set()
+    cats: set[str] = set()
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb[sheet_name]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row is None:
+                continue
+            if name_idx is not None:
+                v = _cell_text(row, name_idx)
+                if v:
+                    names.add(v)
+            if cat_idx is not None:
+                v = _cell_text(row, cat_idx)
+                if v:
+                    cats.add(v)
+    finally:
+        wb.close()
+
+    product_name = next(iter(names)) if len(names) == 1 else ""
+    product_category = next(iter(cats)) if len(cats) == 1 else ""
+    return product_name, product_category
 
 
 def _style_header_row(ws, row: int, start_col: int, end_col: int) -> None:
@@ -237,33 +284,147 @@ def _top_rows_for_type(summary_rows: list[dict], item_type: str, top_n: int) -> 
     return rows[: max(0, int(top_n))]
 
 
-def _add_horizontal_bar_chart(
+def _truncate_label(text: str, max_chars: int = 14) -> str:
+    t = str(text or "").strip()
+    if len(t) <= max_chars:
+        return t
+    return t[: max_chars - 1] + "…"
+
+
+# Overview fixed grid: 2 columns × 3 rows (table left / chart right per cell)
+_GRID_BLOCK_HEIGHT = 24
+_LEFT_TABLE_COL = 1   # A
+_LEFT_CAT_COL = 4     # D (chart categories, truncated; hidden)
+_LEFT_CHART_ANCHOR_COL = "E"
+_RIGHT_TABLE_COL = 9  # I
+_RIGHT_CAT_COL = 12   # L (hidden)
+_RIGHT_CHART_ANCHOR_COL = "M"
+_CHART_WIDTH = 12.0
+_CHART_HEIGHT = 8.0
+
+
+def _add_column_chart(
     ws,
     *,
     title: str,
     header_row: int,
     data_start_row: int,
     data_end_row: int,
+    value_col: int,
+    cat_col: int,
     anchor: str,
 ) -> None:
-    """Horizontal bar chart: categories=具体维度, values=提及频率."""
+    """Vertical column chart: categories from cat_col, values=提及频率."""
     chart = BarChart()
-    chart.type = "bar"
+    chart.type = "col"
     chart.style = 10
     chart.title = title
     chart.y_axis.title = None
     chart.x_axis.title = None
-    chart.x_axis.numFmt = "0.00%"
+    chart.y_axis.numFmt = "0.00%"
     chart.legend = None
-    data = Reference(ws, min_col=3, min_row=header_row, max_row=data_end_row)
-    cats = Reference(ws, min_col=1, min_row=data_start_row, max_row=data_end_row)
+    data = Reference(ws, min_col=value_col, min_row=header_row, max_row=data_end_row)
+    cats = Reference(ws, min_col=cat_col, min_row=data_start_row, max_row=data_end_row)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
-    n = max(1, data_end_row - data_start_row + 1)
     chart.shape = 4
-    chart.width = 14
-    chart.height = max(6, min(14, 3 + n * 0.55))
+    chart.width = _CHART_WIDTH
+    chart.height = _CHART_HEIGHT
     ws.add_chart(chart, anchor)
+
+
+def _ensure_analysis_sheets_at_end(wb, original_sheet_order: list[str]) -> None:
+    """
+    Explicitly force final order:
+    [original sheets in original order] + 评论分析总览 + 评论分析结果
+    Does not rely on create_sheet / move_sheet defaults alone.
+    """
+    originals = [n for n in original_sheet_order if n in wb.sheetnames]
+    analysis = [n for n in (OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME) if n in wb.sheetnames]
+    known = set(originals) | set(analysis)
+    extras = [n for n in wb.sheetnames if n not in known]
+    desired = originals + extras + analysis
+    sheets_by_name = {ws.title: ws for ws in wb._sheets}
+    wb._sheets = [sheets_by_name[n] for n in desired]
+
+
+def _write_module_block(
+    ws,
+    *,
+    start_row: int,
+    table_col: int,
+    cat_col: int,
+    chart_anchor_col: str,
+    item_type: str,
+    summary_rows: list[dict],
+) -> str:
+    """Write one TOP table + column chart in a grid cell. Returns chart title."""
+    top_n = int(OVERVIEW_TOP_N.get(item_type, 5))
+    display = type_display_label(item_type)
+    chart_title = f"{display} TOP {top_n}"
+
+    title_cell = ws.cell(row=start_row, column=table_col, value=chart_title)
+    title_cell.font = _SECTION_FONT
+    title_cell.fill = _SECTION_FILL
+    ws.merge_cells(
+        start_row=start_row,
+        start_column=table_col,
+        end_row=start_row,
+        end_column=table_col + 2,
+    )
+    ws.row_dimensions[start_row].height = 20
+
+    header_row = start_row + 1
+    for offset, name in enumerate(["具体维度", "提及评论数", "提及频率"]):
+        ws.cell(row=header_row, column=table_col + offset, value=name)
+    _style_header_row(ws, header_row, table_col, table_col + 2)
+    # Hidden header for chart category series alignment
+    ws.cell(row=header_row, column=cat_col, value="图表标签")
+
+    top_rows = _top_rows_for_type(summary_rows or [], item_type, top_n)
+    if not top_rows:
+        top_rows = [{"dimension": "暂无数据", "mention_count": 0, "mention_rate": 0}]
+
+    data_start = header_row + 1
+    row = data_start
+    for item in top_rows:
+        dim = str(item.get("dimension") or "")
+        dim_cell = ws.cell(row=row, column=table_col, value=dim)
+        dim_cell.font = _BODY_FONT
+        dim_cell.border = _THIN
+        dim_cell.alignment = Alignment(wrap_text=True, vertical="center")
+
+        count_cell = ws.cell(row=row, column=table_col + 1, value=int(item.get("mention_count") or 0))
+        count_cell.font = _BODY_FONT
+        count_cell.alignment = Alignment(horizontal="center")
+        count_cell.border = _THIN
+
+        rate_cell = ws.cell(
+            row=row,
+            column=table_col + 2,
+            value=float(item.get("mention_rate") or 0) / 100.0,
+        )
+        rate_cell.number_format = "0.00%"
+        rate_cell.font = _BODY_FONT
+        rate_cell.alignment = Alignment(horizontal="center")
+        rate_cell.border = _THIN
+
+        ws.cell(row=row, column=cat_col, value=_truncate_label(dim))
+        row += 1
+    data_end = row - 1
+
+    # Chart to the RIGHT of the table (same block row) — never over the table cells
+    _add_column_chart(
+        ws,
+        title=chart_title,
+        header_row=header_row,
+        data_start_row=data_start,
+        data_end_row=data_end,
+        value_col=table_col + 2,
+        cat_col=cat_col,
+        anchor=f"{chart_anchor_col}{start_row}",
+    )
+    return chart_title
 
 
 def _build_overview_sheet(
@@ -275,78 +436,88 @@ def _build_overview_sheet(
     total_reviews: int = 0,
     voc_items: int = 0,
 ) -> list[str]:
-    """Build 评论分析总览. Returns chart titles created."""
+    """Build 评论分析总览: meta + fixed 2×3 grid (table | chart)."""
     if OVERVIEW_SHEET_NAME in wb.sheetnames:
         del wb[OVERVIEW_SHEET_NAME]
-    ws = wb.create_sheet(OVERVIEW_SHEET_NAME, 0)
+    ws = wb.create_sheet(OVERVIEW_SHEET_NAME)
 
     ws["A1"] = "Amazon 评论分析总览"
     ws["A1"].font = _TITLE_FONT
-    ws.merge_cells("A1:G1")
+    ws.merge_cells("A1:F1")
+    ws.row_dimensions[1].height = 28
 
-    meta = [
-        ("产品名称", _display_or_dash(product_name)),
-        ("产品类目", _display_or_dash(product_category)),
+    row = 3
+    product_name = str(product_name or "").strip()
+    product_category = str(product_category or "").strip()
+    # Show product rows only when present (no "-" placeholders)
+    if product_name:
+        ws.cell(row=row, column=1, value="产品名称").font = Font(name="Microsoft YaHei", bold=True, size=10)
+        ws.cell(row=row, column=2, value=product_name).font = _BODY_FONT
+        row += 1
+    if product_category:
+        ws.cell(row=row, column=1, value="产品类目").font = Font(name="Microsoft YaHei", bold=True, size=10)
+        ws.cell(row=row, column=2, value=product_category).font = _BODY_FONT
+        row += 1
+
+    for label, value in (
         ("评论总数", int(total_reviews or 0)),
         ("VOC提炼条目数", int(voc_items or 0)),
         ("标准维度数", len(summary_rows or [])),
-    ]
-    for i, (label, value) in enumerate(meta, start=2):
-        ws.cell(row=i, column=1, value=label).font = Font(name="Microsoft YaHei", bold=True, size=10)
-        ws.cell(row=i, column=2, value=value).font = _BODY_FONT
+    ):
+        ws.cell(row=row, column=1, value=label).font = Font(name="Microsoft YaHei", bold=True, size=10)
+        ws.cell(row=row, column=2, value=value).font = _BODY_FONT
+        row += 1
 
-    ws.freeze_panes = "A7"
-    for idx, width in enumerate([18, 14, 12, 12, 12, 12, 18], start=1):
-        ws.column_dimensions[get_column_letter(idx)].width = width
+    grid_start = row + 2
+    ws.freeze_panes = f"A{grid_start}"
+
+    widths = {
+        "A": 20,
+        "B": 12,
+        "C": 12,
+        "D": 3,
+        "E": 3,
+        "F": 3,
+        "G": 3,
+        "H": 3,
+        "I": 20,
+        "J": 12,
+        "K": 12,
+        "L": 3,
+        "M": 3,
+        "N": 3,
+    }
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+    ws.column_dimensions["D"].hidden = True
+    ws.column_dimensions["L"].hidden = True
 
     chart_titles: list[str] = []
-    row = 8
-    for item_type in VOC_TYPES:
-        top_n = int(OVERVIEW_TOP_N.get(item_type, 5))
-        chart_title = f"{item_type} TOP {top_n}"
-        section_title = ws.cell(row=row, column=1, value=chart_title)
-        section_title.font = _SECTION_FONT
-        section_title.fill = _SECTION_FILL
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
-        row += 1
-
-        top_rows = _top_rows_for_type(summary_rows or [], item_type, top_n)
-        if not top_rows:
-            empty = ws.cell(row=row, column=1, value="暂无数据")
-            empty.font = _BODY_FONT
-            row += 3
-            continue
-
-        header_row = row
-        for col, name in enumerate(["具体维度", "提及评论数", "提及频率"], start=1):
-            ws.cell(row=header_row, column=col, value=name)
-        _style_header_row(ws, header_row, 1, 3)
-        row += 1
-        data_start = row
-        for item in top_rows:
-            ws.cell(row=row, column=1, value=item.get("dimension") or "").font = _BODY_FONT
-            ws.cell(row=row, column=1).border = _THIN
-            count_cell = ws.cell(row=row, column=2, value=int(item.get("mention_count") or 0))
-            count_cell.font = _BODY_FONT
-            count_cell.alignment = Alignment(horizontal="center")
-            count_cell.border = _THIN
-            rate_cell = ws.cell(row=row, column=3, value=float(item.get("mention_rate") or 0) / 100.0)
-            rate_cell.number_format = "0.00%"
-            rate_cell.font = _BODY_FONT
-            rate_cell.alignment = Alignment(horizontal="center")
-            rate_cell.border = _THIN
-            row += 1
-        data_end = row - 1
-        _add_horizontal_bar_chart(
-            ws,
-            title=chart_title,
-            header_row=header_row,
-            data_start_row=data_start,
-            data_end_row=data_end,
-            anchor=f"E{header_row}",
-        )
-        chart_titles.append(chart_title)
-        row += 3
+    for idx, item_type in enumerate(VOC_TYPES):
+        grid_r = idx // 2
+        grid_c = idx % 2
+        start_row = grid_start + grid_r * _GRID_BLOCK_HEIGHT
+        if grid_c == 0:
+            title = _write_module_block(
+                ws,
+                start_row=start_row,
+                table_col=_LEFT_TABLE_COL,
+                cat_col=_LEFT_CAT_COL,
+                chart_anchor_col=_LEFT_CHART_ANCHOR_COL,
+                item_type=item_type,
+                summary_rows=summary_rows or [],
+            )
+        else:
+            title = _write_module_block(
+                ws,
+                start_row=start_row,
+                table_col=_RIGHT_TABLE_COL,
+                cat_col=_RIGHT_CAT_COL,
+                chart_anchor_col=_RIGHT_CHART_ANCHOR_COL,
+                item_type=item_type,
+                summary_rows=summary_rows or [],
+            )
+        chart_titles.append(title)
 
     return chart_titles
 
@@ -354,7 +525,7 @@ def _build_overview_sheet(
 def _build_result_sheet(wb, summary_rows: list[dict]) -> None:
     if RESULT_SHEET_NAME in wb.sheetnames:
         del wb[RESULT_SHEET_NAME]
-    ws = wb.create_sheet(RESULT_SHEET_NAME)
+    ws = wb.create_sheet(RESULT_SHEET_NAME)  # append to end
     headers = ["类型", "具体维度", "提及评论数", "提及频率", "代表性反馈"]
     ws.append(headers)
     _style_header_row(ws, 1, 1, 5)
@@ -362,9 +533,10 @@ def _build_result_sheet(wb, summary_rows: list[dict]) -> None:
     for row in summary_rows or []:
         rate = float(row.get("mention_rate") or 0)
         feedback = row.get("representative_feedback") or row.get("core_description") or ""
+        item_type = row.get("item_type") or ""
         ws.append(
             [
-                row.get("item_type") or "",
+                type_display_label(item_type),
                 row.get("dimension") or "",
                 int(row.get("mention_count") or 0),
                 rate / 100.0,
@@ -403,8 +575,7 @@ def write_analysis_workbook(
     voc_items: int | None = None,
 ) -> dict:
     """
-    Keep original sheets; append 评论分析总览 + 评论分析结果.
-    Returns meta: chart_titles, sheetnames, etc.
+    Keep original sheets (order/data/format); append 评论分析总览 + 评论分析结果 at end.
     """
     source_path = Path(source_path)
     if source_path.exists():
@@ -417,6 +588,8 @@ def write_analysis_workbook(
     for name in ANALYSIS_SHEET_NAMES:
         if name in wb.sheetnames:
             del wb[name]
+
+    original_sheet_order = list(wb.sheetnames)
 
     summary_rows = list(summary_rows or [])
     if voc_items is None:
@@ -431,12 +604,7 @@ def write_analysis_workbook(
         voc_items=int(voc_items or 0),
     )
     _build_result_sheet(wb, summary_rows)
-
-    # Keep overview first, result second, originals after
-    desired = [OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME]
-    for idx, name in enumerate(desired):
-        if name in wb.sheetnames:
-            wb.move_sheet(name, offset=idx - wb.sheetnames.index(name))
+    _ensure_analysis_sheets_at_end(wb, original_sheet_order)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)

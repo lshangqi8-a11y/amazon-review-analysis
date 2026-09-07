@@ -2,8 +2,9 @@
 name: amazon-review-analysis-v2
 description: >-
   Amazon review analysis V2 Beta: adaptive business-level dimension normalization,
-  six-type statistics, Excel overview dashboard with horizontal bar charts, and a
-  full 评论分析结果 sheet with representative feedback. Use when the user uploads
+  six-type statistics, Excel overview dashboard with column charts (2×3 grid), and a
+  full 评论分析结果 sheet with representative feedback. Default: upload reviews xlsx
+  and run — product_name / product_category are optional. Use when the user uploads
   Amazon reviews xlsx, asks for 评论分析 / VOC / Amazon review analysis V2, or wants
   评论分析总览 with charts.
 ---
@@ -14,30 +15,50 @@ description: >-
 
 > V1.0.2（`main`）为稳定版；本包为 **V2 Beta**（分支 `v2-dev`）。
 
+## 默认使用方式
+
+**上传 Amazon 评论 Excel → 直接运行。**
+
+- 不要求用户填写产品名称、产品类目。
+- 不得因缺少 `product_name` / `product_category` 询问用户或中断流程。
+- 二者为可选增强：用户主动提供时使用；或从 Excel 中可靠读取到单一值时自动填入；否则保持为空，直接基于评论文本分析。
+- 禁止为补产品名称/类目新增 AI 调用。
+
 ## 输入
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | file | 是 | Amazon 评论 xlsx |
-| product_name | 否 | 产品名称 |
-| product_category | 否 | 最多一个类目 |
+| product_name | 否 | 可选增强；不填也可跑 |
+| product_category | 否 | 可选增强；最多一个类目 |
 
 ASIN 若存在于原表，仅保留原列，不参与分组/统计。
 
 ## 输出
 
-保留用户原始 Sheet，仅新增两张分析 Sheet：
+保留用户原始 Sheet（名称/顺序/数据/格式不变），在**工作簿末尾**追加两张分析 Sheet：
 
 1. **评论分析总览**
-   - 基础信息：产品名称/类目、评论总数、VOC提炼条目数、标准维度数
-   - 六模块 Top：消费人群/产品用途/使用场景/购买动机 Top5；用户满意/用户不满 Top10
-   - Excel 原生横向条形图（提及频率）
+   - 基础信息：有产品名称才显示该行；有产品类目才显示该行；评论总数、VOC提炼条目数、标准维度数
+   - 六模块固定 **2 列 × 3 行**网格（左表右图，互不遮挡）：
+     消费人群 / 产品用途 / 使用场景 / 购买动机 / 用户满意 / **未被满足**
+   - Top：前四类 Top5；用户满意 / 未被满足 Top10
+   - Excel 原生**纵向柱状图**（提及频率），共 6 个
 2. **评论分析结果**
    - 列：`类型` | `具体维度` | `提及评论数` | `提及频率` | `代表性反馈`
+   - 类型列对外展示：「用户不满」显示为「未被满足」
    - 完整维度；代表性反馈最多 5 条（真实单条提炼，不改写）
 
+Sheet 顺序（强制）：
+
+```
+[所有用户原始 Sheet，原顺序] → 评论分析总览 → 评论分析结果
+```
+
+若输入已含旧分析 Sheet（评论分析总览 / 评论分析结果 / VOC分析结果 / VOC评论明细），先删除再重新追加到末尾。
+
 排序（结果 Sheet）：
-1. 六类固定顺序：消费人群 → 产品用途 → 使用场景 → 购买动机 → 用户满意 → 用户不满
+1. 六类固定顺序：消费人群 → 产品用途 → 使用场景 → 购买动机 → 用户满意 → 用户不满（展示为未被满足）
 2. 同类型内按提及评论数从高到低
 3. 同频再按具体维度名称
 
@@ -50,7 +71,9 @@ ASIN 若存在于原表，仅保留原列，不参与分组/统计。
 
 ## 六类一级类型（固定）
 
-消费人群 / 产品用途 / 使用场景 / 购买动机 / 用户满意 / 用户不满
+内部键：消费人群 / 产品用途 / 使用场景 / 购买动机 / 用户满意 / 用户不满  
+
+对外展示：用户不满 → **未被满足**（仅展示层；Prompt / 统计口径不变）
 
 具体维度动态产生，禁止用固定类目标签库限制分析。
 
@@ -77,7 +100,12 @@ python "$SKILL_ROOT\scripts\step1_prepare_extract.py" --input ".\reviews.xlsx" -
 ```bash
 python "$SKILL_ROOT/scripts/step1_prepare_extract.py" \
   --input "/path/to/reviews.xlsx" \
-  --workdir "$WORKDIR" \
+  --workdir "$WORKDIR"
+```
+
+可选增强（不要主动向用户索要）：
+
+```bash
   --product-name "可选" \
   --product-category "可选"
 ```
@@ -125,6 +153,7 @@ python "$SKILL_ROOT/scripts/step4_finalize.py" \
 - review_id 缺失不能自动补空  
 - 归一 mapping 缺失不能 identity fallback  
 - 输出截断不能当成功  
+- 不要因缺少产品名称/类目而询问用户  
 
 ## Prompt 文件
 

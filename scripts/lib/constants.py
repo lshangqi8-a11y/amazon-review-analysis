@@ -24,9 +24,32 @@ OVERVIEW_TOP_N = {
     "用户满意": 10,
     "用户不满": 10,
 }
+# Overview / result sheet display labels (internal type keys unchanged)
+TYPE_DISPLAY_LABELS = {
+    "用户不满": "未被满足",
+}
 ANALYSIS_SHEET_NAMES = (
     OVERVIEW_SHEET_NAME,
     RESULT_SHEET_NAME,
     "VOC分析结果",
     "VOC评论明细",
 )
+
+PRODUCT_NAME_HEADER_CANDIDATES = [
+    "产品名称",
+    "商品名称",
+    "品名",
+    "product name",
+    "product",
+    "item name",
+]
+
+PRODUCT_CATEGORY_HEADER_CANDIDATES = [
+    "产品类目",
+    "商品类目",
+    "类目",
+    "品类",
+    "category",
+    "product category",
+    "product type",
+]

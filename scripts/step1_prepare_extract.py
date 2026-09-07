@@ -19,6 +19,7 @@ from lib.constants import EXTRACT_CHUNK_LIMIT
 from lib.excel_io import (
     build_reviews_block,
     count_and_load_reviews,
+    guess_product_fields,
     resolve_review_columns,
 )
 from lib.io_util import format_product, read_text, render_template, skill_root, write_json
@@ -28,8 +29,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare extract batches for Agent AI")
     parser.add_argument("--input", required=True, help="Input xlsx path")
     parser.add_argument("--workdir", required=True, help="Working directory for this run")
-    parser.add_argument("--product-name", default="")
-    parser.add_argument("--product-category", default="")
+    parser.add_argument(
+        "--product-name",
+        default="",
+        help="Optional. Prefer CLI; else auto-read a single reliable Excel value; else empty.",
+    )
+    parser.add_argument(
+        "--product-category",
+        default="",
+        help="Optional. Prefer CLI; else auto-read a single reliable Excel value; else empty.",
+    )
     parser.add_argument("--sheet", default="")
     parser.add_argument("--title-column", default="")
     parser.add_argument("--content-column", default="")
@@ -57,8 +66,15 @@ def main() -> int:
         input_path, sheet, content_column=content_col, title_column=title_col
     )
     ai_reviews = [r for r in reviews if not r.get("skip_ai")]
-    product_name = format_product(args.product_name)
-    product_category = format_product(args.product_category)
+
+    # Never require / ask for product meta. No AI call to fill it.
+    cli_name = (args.product_name or "").strip()
+    cli_cat = (args.product_category or "").strip()
+    auto_name, auto_cat = guess_product_fields(input_path, sheet)
+    product_name_raw = cli_name or auto_name or ""
+    product_category_raw = cli_cat or auto_cat or ""
+    product_name = format_product(product_name_raw)
+    product_category = format_product(product_category_raw)
 
     prompts = skill_root() / "prompts"
     system_tpl = read_text(prompts / "extract_system.md")
@@ -111,8 +127,14 @@ def main() -> int:
             "sheet_name": sheet,
             "title_column": title_col,
             "content_column": content_col,
-            "product_name": args.product_name or "",
-            "product_category": args.product_category or "",
+            "product_name": product_name_raw,
+            "product_category": product_category_raw,
+            "product_name_source": (
+                "cli" if cli_name else ("excel" if auto_name else "empty")
+            ),
+            "product_category_source": (
+                "cli" if cli_cat else ("excel" if auto_cat else "empty")
+            ),
             "total_reviews": len(reviews),
             "ai_reviews": len(ai_reviews),
             "empty_reviews": len(reviews) - len(ai_reviews),

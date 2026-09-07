@@ -1,6 +1,6 @@
 # Amazon 评论分析 Skill V2 Beta
 
-独立发布包：下载 → 安装到 Agent skills 目录 → `pip install -r requirements.txt` → 上传评论 Excel 即可使用。
+独立发布包：下载 → 安装到 Agent skills 目录 → `pip install -r requirements.txt` → **上传评论 Excel 即可使用**（无需填写产品名称/类目）。
 
 不依赖本公司 Flask / AI Gateway / 数据库。语义分析由你当前 Agent 所选模型完成；读表、校验、统计、出 Excel 由本包 Python 脚本完成。
 
@@ -14,9 +14,10 @@
 ## V2 新增
 
 1. 自适应业务级维度归一（消费人群/使用场景颗粒度优化）
-2. Excel **评论分析总览**（六模块 Top + 横向条形图）
+2. Excel **评论分析总览**（2×3 网格 + 纵向柱状图 ×6）
 3. 完整 **评论分析结果**（含代表性反馈最多 5 条）
-4. 六维统计可视化
+4. 对外展示「用户不满」→「未被满足」
+5. 产品名称/类目可选；默认只上传 Excel 即可跑
 
 ## 安装（同事按此操作）
 
@@ -48,8 +49,8 @@ pip install -r requirements.txt
 
 ### 4. 使用
 
-1. 上传 Amazon 评论 `.xlsx`
-2. 说明：使用 **Amazon 评论分析 V2**（可选产品名称、产品类目）
+1. 上传 Amazon 评论 `.xlsx`（**唯一必填输入**）
+2. 说明：使用 **Amazon 评论分析 V2**（产品名称、产品类目可选，不要主动索要）
 3. Agent 按 `SKILL.md` 执行，返回含 **评论分析总览** + **评论分析结果** 的 Excel
 
 ## 输入 / 输出
@@ -57,13 +58,17 @@ pip install -r requirements.txt
 **输入**
 
 - `file`（必填）：xlsx
-- `product_name`（可选）
-- `product_category`（可选，最多一个）
+- `product_name`（可选增强，不要求填写）
+- `product_category`（可选增强，最多一个）
 
-**输出**
+**输出 Sheet 顺序**
 
-- 保留原表 Sheet
-- 新增：`评论分析总览`、`评论分析结果`
+```
+[原始 Sheet…] → 评论分析总览 → 评论分析结果
+```
+
+- 总览：2×3 网格（左表右图）；六模块含「未被满足」；柱状图 6 个
+- 结果：完整维度表，无图表；类型列展示「未被满足」
 
 ## 环境要求
 
