@@ -108,15 +108,22 @@ def test_dashboard_full() -> None:
         assert meta["sheetnames"] == expected, meta["sheetnames"]
         assert meta["chart_count"] == 4, meta["chart_count"]
         assert meta["chart_titles"] == [
-            "消费人群 TOP 5",
-            "产品用途 TOP 5",
-            "使用场景 TOP 5",
-            "购买动机 TOP 5",
+            "消费人群（5）",
+            "产品用途（5）",
+            "使用场景（5）",
+            "购买动机（5）",
         ], meta["chart_titles"]
 
         wb = load_workbook(out)
         assert wb.sheetnames == expected
         ov = wb[OVERVIEW_SHEET_NAME]
+
+        # Meta stats are on a single row (row 3)
+        assert ov.cell(row=3, column=1).value == "评论总数"
+        assert ov.cell(row=3, column=2).value == 100
+        assert ov.cell(row=3, column=3).value == "VOC提炼条目数"
+        assert ov.cell(row=3, column=5).value == "标准维度数"
+        assert ov.cell(row=4, column=1).value is None  # no vertical stack
 
         # No visible classic table headers in dashboard area A:S
         visible_vals = []
@@ -133,6 +140,7 @@ def test_dashboard_full() -> None:
         assert "未被满足" in joined
         assert "用户满意" in joined
         assert "用户不满" not in joined
+        assert any("全部 5 项" in v or "全部 10 项" in v for v in visible_vals)
 
         assert len(ov._charts) == 4
         for ch in ov._charts:
@@ -198,13 +206,17 @@ def test_empty_portrait_modules() -> None:
             voc_items=20,
         )
         assert meta["chart_count"] == 2, meta["chart_count"]
-        assert meta["chart_titles"] == ["消费人群 TOP 5", "购买动机 TOP 5"]
+        assert meta["chart_titles"] == ["消费人群（5）", "购买动机（5）"]
         empty = [m for m in meta["module_metas"] if not m["has_chart"]]
         assert {m["type"] for m in empty} == {"产品用途", "使用场景"}
 
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
         assert len(ov._charts) == 2
+        # product + category + stats share one meta row
+        assert ov.cell(row=3, column=1).value == "产品名称"
+        assert ov.cell(row=3, column=3).value == "产品类目"
+        assert ov.cell(row=3, column=5).value == "评论总数"
         vals = [
             str(ov.cell(row=r, column=c).value)
             for r in range(1, 70)
@@ -214,6 +226,46 @@ def test_empty_portrait_modules() -> None:
         assert vals.count("暂无足够评论证据") >= 2
         assert "产品名称" in vals
         assert "产品类目" in vals
+        wb.close()
+
+
+def test_show_all_dimensions_no_top_cut() -> None:
+    """Overview must not truncate when OVERVIEW_TOP_N is None."""
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        src = td_path / "in.xlsx"
+        out = td_path / "out.xlsx"
+        _write_source(src)
+        rows = []
+        for i in range(12):
+            rows.append(
+                {
+                    "item_type": "消费人群",
+                    "dimension": f"人群{i}",
+                    "mention_count": 12 - i,
+                    "mention_rate": float(12 - i),
+                    "representative_feedback": f"fb{i}",
+                }
+            )
+        meta = write_analysis_workbook(
+            src,
+            out,
+            summary_rows=rows,
+            total_reviews=20,
+            voc_items=12,
+        )
+        assert meta["chart_titles"] == ["消费人群（12）"]
+        wb = load_workbook(out)
+        ov = wb[OVERVIEW_SHEET_NAME]
+        # Hidden source should contain all 12 categories
+        from openpyxl.utils import get_column_letter
+
+        cats = [
+            ov.cell(row=r, column=24).value
+            for r in range(2, 20)
+            if ov.cell(row=r, column=24).value
+        ]
+        assert len(cats) == 12, cats
         wb.close()
 
 
@@ -237,4 +289,5 @@ if __name__ == "__main__":
     test_display_and_guess()
     test_dashboard_full()
     test_empty_portrait_modules()
+    test_show_all_dimensions_no_top_cut()
     print("ALL_TESTS_PASSED")

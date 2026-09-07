@@ -279,10 +279,26 @@ def _style_header_row(ws, row: int, start_col: int, end_col: int) -> None:
         cell.border = _THIN
 
 
-def _top_rows_for_type(summary_rows: list[dict], item_type: str, top_n: int) -> list[dict]:
+def _top_rows_for_type(
+    summary_rows: list[dict],
+    item_type: str,
+    top_n: int | None = None,
+) -> list[dict]:
     rows = [r for r in summary_rows if (r.get("item_type") or "") == item_type]
     rows.sort(key=lambda x: (-int(x.get("mention_count") or 0), str(x.get("dimension") or "")))
-    return rows[: max(0, int(top_n))]
+    if top_n is None or int(top_n) <= 0:
+        return rows
+    return rows[: int(top_n)]
+
+
+def _overview_limit_for_type(item_type: str) -> int | None:
+    """None = unlimited. Dict value or global None from OVERVIEW_TOP_N."""
+    if OVERVIEW_TOP_N is None:
+        return None
+    if isinstance(OVERVIEW_TOP_N, dict):
+        val = OVERVIEW_TOP_N.get(item_type)
+        return None if val is None else int(val)
+    return None
 
 
 def _truncate_label(text: str, max_chars: int = 12) -> str:
@@ -391,7 +407,9 @@ def _add_portrait_column_chart(
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
     chart.shape = 4
-    chart.width = _CHART_WIDTH
+    n_points = max(1, data_end_row - data_start_row + 1)
+    # Widen slightly when many categories so labels stay readable
+    chart.width = _CHART_WIDTH + min(6.0, max(0.0, (n_points - 5) * 0.6))
     chart.height = _CHART_HEIGHT
     labels = DataLabelList()
     labels.showVal = True
@@ -415,7 +433,7 @@ def _write_portrait_module(
     hidden_val_col: int,
     hidden_header_row: int,
 ) -> dict:
-    top_n = int(OVERVIEW_TOP_N.get(item_type, 5))
+    top_n = _overview_limit_for_type(item_type)
     display = type_display_label(item_type)
     card_end_row = card_row + _CARD_ROW_HEIGHT - 1
     _fill_range(ws, card_row, card_col_start, card_end_row, card_col_end, _CARD_FILL)
@@ -430,11 +448,14 @@ def _write_portrait_module(
         end_row=card_row,
         end_column=min(card_col_start + 3, card_col_end),
     )
-    sub = ws.cell(row=card_row + 1, column=card_col_start, value=f"Top {top_n} · 提及频率")
+    top_rows = _top_rows_for_type(summary_rows or [], item_type, top_n)
+    sub_text = f"全部 {len(top_rows)} 项 · 提及频率" if top_rows else "提及频率"
+    if top_n is not None:
+        sub_text = f"Top {top_n} · 提及频率"
+    sub = ws.cell(row=card_row + 1, column=card_col_start, value=sub_text)
     sub.font = Font(name="Microsoft YaHei", size=9, color="808080")
     sub.fill = _CARD_FILL
 
-    top_rows = _top_rows_for_type(summary_rows or [], item_type, top_n)
     if not top_rows:
         msg_row = card_row + (_CARD_ROW_HEIGHT // 2)
         msg = ws.cell(row=msg_row, column=card_col_start, value="暂无足够评论证据")
@@ -464,7 +485,10 @@ def _write_portrait_module(
 
     data_start = hidden_header_row + 1
     data_end = hidden_header_row + len(top_rows)
-    chart_title = f"{display} TOP {top_n}"
+    if top_n is None:
+        chart_title = f"{display}（{len(top_rows)}）"
+    else:
+        chart_title = f"{display} TOP {top_n}"
     anchor = f"{get_column_letter(card_col_start)}{card_row + 2}"
     y_max = max(float(item.get("mention_rate") or 0) / 100.0 for item in top_rows)
     _add_portrait_column_chart(
@@ -511,7 +535,7 @@ def _write_feedback_panel(
     databar_color: str,
 ) -> int:
     display = type_display_label(item_type)
-    top_n = int(OVERVIEW_TOP_N.get(item_type, 10))
+    top_n = _overview_limit_for_type(item_type)
     dim_c = col_start
     bar_c = col_start + 2
     metric_c = col_start + 3
@@ -595,32 +619,33 @@ def _build_overview_sheet(
     ws.merge_cells("A1:I1")
     ws.row_dimensions[1].height = 28
 
-    row = 3
+    # One compact meta row (optional product fields + three stats)
+    meta_row = 3
     product_name = str(product_name or "").strip()
     product_category = str(product_category or "").strip()
-    if product_name:
-        ws.cell(row=row, column=1, value="产品名称").font = Font(name="Microsoft YaHei", bold=True, size=10)
-        ws.cell(row=row, column=2, value=product_name).font = _BODY_FONT
-        row += 1
-    if product_category:
-        ws.cell(row=row, column=1, value="产品类目").font = Font(name="Microsoft YaHei", bold=True, size=10)
-        ws.cell(row=row, column=2, value=product_category).font = _BODY_FONT
-        row += 1
-
-    for label, value in (
-        ("评论总数", int(total_reviews or 0)),
-        ("VOC提炼条目数", int(voc_items or 0)),
-        ("标准维度数", len(summary_rows or [])),
+    label_font = Font(name="Microsoft YaHei", bold=True, size=10)
+    col = 1
+    for label, value, show in (
+        ("产品名称", product_name, bool(product_name)),
+        ("产品类目", product_category, bool(product_category)),
+        ("评论总数", int(total_reviews or 0), True),
+        ("VOC提炼条目数", int(voc_items or 0), True),
+        ("标准维度数", len(summary_rows or []), True),
     ):
-        ws.cell(row=row, column=1, value=label).font = Font(name="Microsoft YaHei", bold=True, size=10)
-        ws.cell(row=row, column=2, value=value).font = _BODY_FONT
-        row += 1
+        if not show:
+            continue
+        ws.cell(row=meta_row, column=col, value=label).font = label_font
+        ws.cell(row=meta_row, column=col + 1, value=value).font = _BODY_FONT
+        col += 2
+    ws.row_dimensions[meta_row].height = 20
 
-    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["A"].width = 14
     ws.column_dimensions["B"].width = 12
     ws.column_dimensions["C"].width = 14
-    ws.column_dimensions["D"].width = 14
-    for letter in ("E", "F", "G", "H", "I"):
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 14
+    ws.column_dimensions["F"].width = 10
+    for letter in ("G", "H", "I"):
         ws.column_dimensions[letter].width = 12
     ws.column_dimensions["J"].width = 2
     ws.column_dimensions["K"].width = 16
@@ -630,12 +655,12 @@ def _build_overview_sheet(
     for letter in ("O", "P", "Q", "R", "S"):
         ws.column_dimensions[letter].width = 12
 
-    for col in range(_HIDDEN_START_COL, _HIDDEN_START_COL + 8):
-        letter = get_column_letter(col)
+    for col_i in range(_HIDDEN_START_COL, _HIDDEN_START_COL + 8):
+        letter = get_column_letter(col_i)
         ws.column_dimensions[letter].hidden = True
         ws.column_dimensions[letter].width = 12
 
-    upper_start = row + 2
+    upper_start = meta_row + 2
     ws.freeze_panes = f"A{upper_start}"
 
     module_metas: list[dict] = []
@@ -647,7 +672,8 @@ def _build_overview_sheet(
         c1, c2 = _LEFT_CARD_COLS if grid_c == 0 else _RIGHT_CARD_COLS
         hidden_cat = _HIDDEN_START_COL + idx * 2
         hidden_val = hidden_cat + 1
-        hidden_header_row = 1 + idx * 12
+        # Each portrait module uses its own hidden column pair; all start at row 1
+        hidden_header_row = 1
         meta = _write_portrait_module(
             ws,
             card_row=card_row,
