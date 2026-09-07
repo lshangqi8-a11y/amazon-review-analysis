@@ -1,24 +1,41 @@
-# Amazon 评论分析 Skill
+# Amazon 评论分析 Skill V2 Beta
 
 独立发布包：下载 → 安装到 Agent skills 目录 → `pip install -r requirements.txt` → 上传评论 Excel 即可使用。
 
 不依赖本公司 Flask / AI Gateway / 数据库。语义分析由你当前 Agent 所选模型完成；读表、校验、统计、出 Excel 由本包 Python 脚本完成。
 
+## 版本说明
+
+| 版本 | 分支 | 说明 |
+|------|------|------|
+| **V1.0.2** | `main` | 稳定版 |
+| **V2 `2.0.0-beta.1`** | `v2-dev` | Beta：自适应业务归一 + Excel 图表总览 |
+
+## V2 新增
+
+1. 自适应业务级维度归一（消费人群/使用场景颗粒度优化）
+2. Excel **评论分析总览**（六模块 Top + 横向条形图）
+3. 完整 **评论分析结果**（含代表性反馈最多 5 条）
+4. 六维统计可视化
+
 ## 安装（同事按此操作）
 
 ### 1. 获取本包
 
-- 从 GitHub 下载 ZIP，或 `git clone` 本仓库  
-- 解压后应看到：`SKILL.md`、`prompts/`、`scripts/`、`requirements.txt`
+```bash
+git clone -b v2-dev https://github.com/lshangqi8-a11y/amazon-review-analysis.git amazon-review-analysis-v2
+```
+
+或从 GitHub 切换到 `v2-dev` 后下载 ZIP。
 
 ### 2. 安装到 Agent 工具
 
-把整个文件夹放到 skills 目录，文件夹名保持为 `amazon-review-analysis`：
+文件夹名建议：`amazon-review-analysis-v2`
 
 | 工具 | 路径示例 |
 |------|----------|
-| Cursor（个人） | `%USERPROFILE%\.cursor\skills\amazon-review-analysis\` |
-| Cursor（项目） | 项目下 `.cursor\skills\amazon-review-analysis\` |
+| Cursor（个人） | `%USERPROFILE%\.cursor\skills\amazon-review-analysis-v2\` |
+| Cursor（项目） | 项目下 `.cursor\skills\amazon-review-analysis-v2\` |
 | 其他支持 Agent Skills 的工具 | 按其「导入技能 / skills」目录放置本文件夹 |
 
 ### 3. 安装 Python 依赖
@@ -31,11 +48,9 @@ pip install -r requirements.txt
 
 ### 4. 使用
 
-在 Agent 对话中：
-
 1. 上传 Amazon 评论 `.xlsx`
-2. 说明：使用 **Amazon 评论分析**（可选填写产品名称、产品类目）
-3. Agent 按 `SKILL.md` 执行脚本 + 模型两步，返回带 **评论分析结果** Sheet 的 Excel
+2. 说明：使用 **Amazon 评论分析 V2**（可选产品名称、产品类目）
+3. Agent 按 `SKILL.md` 执行，返回含 **评论分析总览** + **评论分析结果** 的 Excel
 
 ## 输入 / 输出
 
@@ -48,8 +63,7 @@ pip install -r requirements.txt
 **输出**
 
 - 保留原表 Sheet
-- 新增 Sheet：`评论分析结果`  
-  列：类型 | 具体维度 | 提及评论数 | 提及频率 | 代表性反馈
+- 新增：`评论分析总览`、`评论分析结果`
 
 ## 环境要求
 
@@ -60,13 +74,14 @@ pip install -r requirements.txt
 ## 目录说明
 
 ```
-amazon-review-analysis/
-  SKILL.md              # Agent 执行说明（安装后自动被工具加载）
-  README.md             # 给人看的安装与使用说明
+amazon-review-analysis-v2/
+  SKILL.md
+  README.md
   LICENSE
+  VERSION
   requirements.txt
-  prompts/              # 提炼 / 归一 Prompt（自包含）
-  scripts/              # 确定性 Python 步骤
+  prompts/
+  scripts/
     step1_prepare_extract.py
     step2_ingest_extract.py
     step3_prepare_normalize.py
@@ -76,4 +91,4 @@ amazon-review-analysis/
 
 ## 版本
 
-1.0.2
+2.0.0-beta.1

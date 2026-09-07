@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Step 4 (Python): validate normalize → stats → write 评论分析结果 Excel
+Step 4 (Python): validate normalize → stats → write overview + result Excel
 """
 from __future__ import annotations
 
@@ -53,7 +53,15 @@ def main() -> int:
     write_json(workdir / "summary.json", summary_rows)
 
     out = Path(args.output).resolve() if args.output else workdir / "评论分析结果.xlsx"
-    write_analysis_workbook(input_file, out, summary_rows=summary_rows)
+    excel_meta = write_analysis_workbook(
+        input_file,
+        out,
+        summary_rows=summary_rows,
+        product_name=meta.get("product_name") or "",
+        product_category=meta.get("product_category") or "",
+        total_reviews=total_reviews,
+        voc_items=len(items),
+    )
 
     result = {
         "output_file": str(out),
@@ -61,10 +69,13 @@ def main() -> int:
         "voc_items": len(items),
         "dimensions": len(summary_rows),
         "mappings": len(mappings),
+        "excel": excel_meta,
     }
     write_json(workdir / "result.json", result)
     print(f"output_file={out}")
     print(f"total_reviews={total_reviews} voc_items={len(items)} dimensions={len(summary_rows)}")
+    print(f"sheets={excel_meta.get('sheetnames')}")
+    print(f"charts={excel_meta.get('chart_count')} titles={excel_meta.get('chart_titles')}")
     print("DONE")
     return 0
 
