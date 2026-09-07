@@ -16,8 +16,10 @@ EXTRACT_CHUNK_LIMIT = 50
 REPRESENTATIVE_FEEDBACK_LIMIT = 5
 OVERVIEW_SHEET_NAME = "评论分析总览"
 RESULT_SHEET_NAME = "评论分析结果"
-# Overview: None = show all dimensions for that type (no Top-N cut).
+# Overview: None = no Top-N cut; still filtered by OVERVIEW_MIN_MENTIONS.
 OVERVIEW_TOP_N = None
+# Overview dashboard only shows dimensions with at least this many mentioning reviews.
+OVERVIEW_MIN_MENTIONS = 2
 # Overview / result sheet display labels (internal type keys unchanged)
 TYPE_DISPLAY_LABELS = {
     "用户不满": "未被满足",

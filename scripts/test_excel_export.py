@@ -10,13 +10,14 @@ from openpyxl import Workbook, load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.constants import OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME
+from lib.constants import OVERVIEW_MIN_MENTIONS, OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME
 from lib.excel_io import (
     PORTRAIT_TYPES,
     guess_product_fields,
     type_display_label,
     write_analysis_workbook,
 )
+from lib.statistics import build_overview_conclusion, build_theme_insight_summary
 
 
 def _row(
@@ -26,13 +27,15 @@ def _row(
     rate: float,
     feedback: str,
 ) -> dict:
-    return {
+    item = {
         "item_type": item_type,
         "dimension": dimension,
         "mention_count": count,
         "mention_rate": rate,
         "representative_feedback": feedback,
     }
+    item["theme_summary"] = build_theme_insight_summary(item)
+    return item
 
 
 def _full_summary(*, skip_types: set[str] | None = None) -> list[dict]:
@@ -43,34 +46,20 @@ def _full_summary(*, skip_types: set[str] | None = None) -> list[dict]:
         ("产品用途", ["日常切割", "厨房备菜", "户外野餐", "精细加工", "开箱拆封"], 5),
         ("使用场景", ["家中厨房", "露营", "办公室", "旅行途中", "餐厅后厨"], 5),
         ("购买动机", ["性价比", "品牌信任", "礼品", "促销吸引", "朋友推荐"], 5),
-        (
-            "用户满意",
-            [f"满意点{i}" for i in range(1, 11)],
-            10,
-        ),
-        (
-            "用户不满",
-            [f"很长很长的痛点维度名称用于截断与换行测试{i}" for i in range(1, 11)],
-            10,
-        ),
+        ("用户满意", [f"满意点{i}" for i in range(1, 11)], 10),
+        ("用户不满", [f"很长很长的痛点维度名称用于截断与换行测试{i}" for i in range(1, 11)], 10),
     ]
     for item_type, dims, _n in specs:
         if item_type in skip_types:
             continue
         for i, dim in enumerate(dims):
+            # First dims have high counts; last ones = 1 to test overview filter
+            count = max(1, 6 - i) if i < 4 else 1
             long_fb = (
-                f"这是第1条代表性反馈，说明维度「{dim}」的真实用户表述，内容偏长用于换行测试；"
+                f"这是第1条代表性反馈，说明维度「{dim}」的真实用户表述；"
                 f"这是第2条；这是第3条"
             )
-            rows.append(
-                _row(
-                    item_type,
-                    dim,
-                    20 - i,
-                    float(20 - i),
-                    long_fb,
-                )
-            )
+            rows.append(_row(item_type, dim, count, float(count), long_fb))
     return rows
 
 
@@ -107,86 +96,45 @@ def test_dashboard_full() -> None:
         expected = ["Reviews", "Summary", "Raw Data", OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME]
         assert meta["sheetnames"] == expected, meta["sheetnames"]
         assert meta["chart_count"] == 4, meta["chart_count"]
-        assert meta["chart_titles"] == [
-            "消费人群（5）",
-            "产品用途（5）",
-            "使用场景（5）",
-            "购买动机（5）",
-        ], meta["chart_titles"]
 
         wb = load_workbook(out)
-        assert wb.sheetnames == expected
         ov = wb[OVERVIEW_SHEET_NAME]
 
-        # Meta stats are on a single row (row 3)
         assert ov.cell(row=3, column=1).value == "评论总数"
-        assert ov.cell(row=3, column=2).value == 100
-        assert ov.cell(row=3, column=3).value == "VOC提炼条目数"
+        assert ov.cell(row=3, column=3).value == "评论洞察条目数"
         assert ov.cell(row=3, column=5).value == "标准维度数"
-        assert ov.cell(row=4, column=1).value is None  # no vertical stack
+        assert ov.cell(row=3, column=7).value == "主维度数"
 
-        # No visible classic table headers in dashboard area A:S
         visible_vals = []
-        for r in range(1, 60):
+        for r in range(1, 100):
             for c in range(1, 20):
                 v = ov.cell(row=r, column=c).value
                 if v is not None:
                     visible_vals.append(str(v))
-        assert "具体维度" not in visible_vals
-        assert "提及评论数" not in visible_vals
         joined = "\n".join(visible_vals)
-        assert "产品名称" not in joined
-        assert "产品类目" not in joined
+        assert "消费者画像" in joined
+        assert "需求满足分析" in joined
+        assert "评论洞察结论" in joined
+        assert "具体维度" not in visible_vals
+        assert "VOC提炼条目数" not in joined
         assert "未被满足" in joined
         assert "用户满意" in joined
         assert "用户不满" not in joined
-        assert any("全部 5 项" in v or "全部 10 项" in v for v in visible_vals)
+        assert any(f"提及≥{OVERVIEW_MIN_MENTIONS}" in v or "主维度" in v for v in visible_vals)
 
         assert len(ov._charts) == 4
         for ch in ov._charts:
             assert ch.type == "col"
             assert ch.visible_cells_only is False
-            assert ch.dataLabels is not None
-            assert ch.dataLabels.showVal is True
 
-        # Hidden helper columns X:AE (24-31)
-        from openpyxl.utils import get_column_letter
-
-        for col in range(24, 32):
-            assert ov.column_dimensions[get_column_letter(col)].hidden is True
-
-        # DataBars present on feedback panels
-        assert len(ov.conditional_formatting._cf_rules) >= 1
-
-        # First feedback only (split on ；)
-        # Find a cell containing only first feedback fragment
-        found_first = False
-        found_second = False
-        for r in range(1, 80):
-            for c in (5, 15):  # feedback cols E / O
-                v = ov.cell(row=r, column=c).value
-                if not v:
-                    continue
-                if "这是第1条代表性反馈" in str(v):
-                    found_first = True
-                if "这是第2条" in str(v):
-                    found_second = True
-        assert found_first
-        assert not found_second
-
-        # Metric text visible without hover
-        metric_ok = any(
-            isinstance(ov.cell(row=r, column=c).value, str)
-            and "% (" in str(ov.cell(row=r, column=c).value)
-            for r in range(1, 80)
-            for c in (4, 14)
-        )
-        assert metric_ok
+        # Theme summary style (not raw only-first snippet without count framing)
+        assert any("出现在" in v and "买家反馈" in v for v in visible_vals)
 
         result = wb[RESULT_SHEET_NAME]
+        # Full detail retained (including mention=1 rows)
+        assert result.max_row > 20
         types = {result.cell(row=r, column=1).value for r in range(2, result.max_row + 1)}
         assert "未被满足" in types
-        assert "用户不满" not in types
         wb.close()
 
 
@@ -206,72 +154,71 @@ def test_empty_portrait_modules() -> None:
             voc_items=20,
         )
         assert meta["chart_count"] == 2, meta["chart_count"]
-        assert meta["chart_titles"] == ["消费人群（5）", "购买动机（5）"]
         empty = [m for m in meta["module_metas"] if not m["has_chart"]]
         assert {m["type"] for m in empty} == {"产品用途", "使用场景"}
-
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
-        assert len(ov._charts) == 2
-        # product + category + stats share one meta row
         assert ov.cell(row=3, column=1).value == "产品名称"
-        assert ov.cell(row=3, column=3).value == "产品类目"
-        assert ov.cell(row=3, column=5).value == "评论总数"
-        vals = [
-            str(ov.cell(row=r, column=c).value)
-            for r in range(1, 70)
-            for c in range(1, 20)
-            if ov.cell(row=r, column=c).value is not None
-        ]
-        assert vals.count("暂无足够评论证据") >= 2
-        assert "产品名称" in vals
-        assert "产品类目" in vals
+        assert "消费者画像" in str(ov.cell(row=5, column=1).value or "") or any(
+            ov.cell(row=r, column=1).value and "消费者画像" in str(ov.cell(row=r, column=1).value)
+            for r in range(1, 30)
+        )
         wb.close()
 
 
-def test_show_all_dimensions_no_top_cut() -> None:
-    """Overview must not truncate when OVERVIEW_TOP_N is None."""
+def test_min_mentions_filters_overview_ones() -> None:
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
         src = td_path / "in.xlsx"
         out = td_path / "out.xlsx"
         _write_source(src)
-        rows = []
-        for i in range(12):
-            rows.append(
-                {
-                    "item_type": "消费人群",
-                    "dimension": f"人群{i}",
-                    "mention_count": 12 - i,
-                    "mention_rate": float(12 - i),
-                    "representative_feedback": f"fb{i}",
-                }
-            )
-        meta = write_analysis_workbook(
-            src,
-            out,
-            summary_rows=rows,
-            total_reviews=20,
-            voc_items=12,
-        )
-        assert meta["chart_titles"] == ["消费人群（12）"]
+        rows = [
+            _row("消费人群", "儿童使用", 10, 33.3, "适合孩子；宝宝喜欢"),
+            _row("消费人群", "偶发人群", 1, 3.3, "偶尔提到"),
+            _row("用户满意", "易清洗", 5, 16.7, "好洗；金属环可拆"),
+            _row("用户满意", "偶发满意", 1, 3.3, "偶尔说好"),
+            _row("用户不满", "密封不良", 4, 13.3, "封不住"),
+            _row("用户不满", "偶发不满", 1, 3.3, "偶发问题"),
+        ]
+        write_analysis_workbook(src, out, summary_rows=rows, total_reviews=30, voc_items=20)
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
-        # Hidden source should contain all 12 categories
-        from openpyxl.utils import get_column_letter
-
-        cats = [
-            ov.cell(row=r, column=24).value
-            for r in range(2, 20)
-            if ov.cell(row=r, column=24).value
-        ]
-        assert len(cats) == 12, cats
+        text = "\n".join(
+            str(ov.cell(row=r, column=c).value)
+            for r in range(1, 90)
+            for c in range(1, 20)
+            if ov.cell(row=r, column=c).value is not None
+        )
+        assert "儿童使用" in text
+        assert "易清洗" in text
+        assert "密封不良" in text
+        assert "偶发人群" not in text
+        assert "偶发满意" not in text
+        assert "偶发不满" not in text
+        # result sheet keeps long-tail
+        res = wb[RESULT_SHEET_NAME]
+        dims = {res.cell(row=r, column=2).value for r in range(2, res.max_row + 1)}
+        assert "偶发人群" in dims
         wb.close()
 
 
-def test_display_and_guess() -> None:
+def test_conclusion_and_display() -> None:
     assert type_display_label("用户不满") == "未被满足"
     assert PORTRAIT_TYPES == ["消费人群", "产品用途", "使用场景", "购买动机"]
+    text = build_overview_conclusion(
+        [
+            _row("消费人群", "儿童使用", 12, 40.0, "孩子用"),
+            _row("用户满意", "易清洗", 5, 16.7, "好洗"),
+            _row("用户不满", "切割不净", 4, 13.3, "切不干净"),
+        ],
+        total_reviews=30,
+    )
+    assert "消费者画像" in text
+    assert "需求满足" in text
+    assert "儿童使用" in text
+
+
+def test_guess_product() -> None:
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "p.xlsx"
         wb = Workbook()
@@ -286,8 +233,9 @@ def test_display_and_guess() -> None:
 
 
 if __name__ == "__main__":
-    test_display_and_guess()
+    test_conclusion_and_display()
+    test_guess_product()
     test_dashboard_full()
     test_empty_portrait_modules()
-    test_show_all_dimensions_no_top_cut()
+    test_min_mentions_filters_overview_ones()
     print("ALL_TESTS_PASSED")

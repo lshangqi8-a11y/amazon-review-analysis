@@ -14,6 +14,7 @@ from openpyxl.utils import get_column_letter
 
 from .constants import (
     ANALYSIS_SHEET_NAMES,
+    OVERVIEW_MIN_MENTIONS,
     OVERVIEW_SHEET_NAME,
     OVERVIEW_TOP_N,
     PRODUCT_CATEGORY_HEADER_CANDIDATES,
@@ -21,6 +22,7 @@ from .constants import (
     RESULT_SHEET_NAME,
     TYPE_DISPLAY_LABELS,
 )
+from .statistics import build_overview_conclusion, build_theme_insight_summary
 TITLE_HEADER_CANDIDATES = [
     "标题",
     "评论标题",
@@ -283,8 +285,12 @@ def _top_rows_for_type(
     summary_rows: list[dict],
     item_type: str,
     top_n: int | None = None,
+    *,
+    min_mentions: int = 0,
 ) -> list[dict]:
     rows = [r for r in summary_rows if (r.get("item_type") or "") == item_type]
+    if min_mentions and int(min_mentions) > 0:
+        rows = [r for r in rows if int(r.get("mention_count") or 0) >= int(min_mentions)]
     rows.sort(key=lambda x: (-int(x.get("mention_count") or 0), str(x.get("dimension") or "")))
     if top_n is None or int(top_n) <= 0:
         return rows
@@ -448,10 +454,15 @@ def _write_portrait_module(
         end_row=card_row,
         end_column=min(card_col_start + 3, card_col_end),
     )
-    top_rows = _top_rows_for_type(summary_rows or [], item_type, top_n)
-    sub_text = f"全部 {len(top_rows)} 项 · 提及频率" if top_rows else "提及频率"
+    top_rows = _top_rows_for_type(
+        summary_rows or [],
+        item_type,
+        top_n,
+        min_mentions=OVERVIEW_MIN_MENTIONS,
+    )
+    sub_text = f"主维度（提及≥{OVERVIEW_MIN_MENTIONS}）· 共 {len(top_rows)} 项 · 提及频率"
     if top_n is not None:
-        sub_text = f"Top {top_n} · 提及频率"
+        sub_text = f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · 提及频率"
     sub = ws.cell(row=card_row + 1, column=card_col_start, value=sub_text)
     sub.font = Font(name="Microsoft YaHei", size=9, color="808080")
     sub.fill = _CARD_FILL
@@ -550,7 +561,12 @@ def _write_feedback_panel(
     ws.merge_cells(start_row=start_row, start_column=dim_c, end_row=start_row, end_column=fb_end)
     ws.row_dimensions[start_row].height = 22
 
-    top_rows = _top_rows_for_type(summary_rows or [], item_type, top_n)
+    top_rows = _top_rows_for_type(
+        summary_rows or [],
+        item_type,
+        top_n,
+        min_mentions=OVERVIEW_MIN_MENTIONS,
+    )
     if not top_rows:
         r = start_row + 2
         cell = ws.cell(row=r, column=dim_c, value="暂无足够评论证据")
@@ -561,7 +577,7 @@ def _write_feedback_panel(
     bar_start_row = start_row + 1
     for i, item in enumerate(top_rows):
         r = start_row + 1 + i
-        ws.row_dimensions[r].height = 36
+        ws.row_dimensions[r].height = 48
         dim = str(item.get("dimension") or "")
         dim_cell = ws.cell(row=r, column=dim_c, value=dim)
         dim_cell.font = _DIM_FONT
@@ -577,9 +593,7 @@ def _write_feedback_panel(
         metric.font = _METRIC_FONT
         metric.alignment = Alignment(horizontal="left", vertical="center")
 
-        fb = _first_representative_feedback(
-            item.get("representative_feedback") or item.get("core_description") or ""
-        )
+        fb = item.get("theme_summary") or build_theme_insight_summary(item)
         fb_cell = ws.cell(row=r, column=fb_c, value=fb)
         fb_cell.font = _FEEDBACK_FONT
         fb_cell.alignment = Alignment(wrap_text=True, vertical="center")
@@ -624,13 +638,17 @@ def _build_overview_sheet(
     product_name = str(product_name or "").strip()
     product_category = str(product_category or "").strip()
     label_font = Font(name="Microsoft YaHei", bold=True, size=10)
+    main_dim_count = sum(
+        1 for r in (summary_rows or []) if int(r.get("mention_count") or 0) >= OVERVIEW_MIN_MENTIONS
+    )
     col = 1
     for label, value, show in (
         ("产品名称", product_name, bool(product_name)),
         ("产品类目", product_category, bool(product_category)),
         ("评论总数", int(total_reviews or 0), True),
-        ("VOC提炼条目数", int(voc_items or 0), True),
+        ("评论洞察条目数", int(voc_items or 0), True),
         ("标准维度数", len(summary_rows or []), True),
+        ("主维度数", main_dim_count, True),
     ):
         if not show:
             continue
@@ -638,6 +656,27 @@ def _build_overview_sheet(
         ws.cell(row=meta_row, column=col + 1, value=value).font = _BODY_FONT
         col += 2
     ws.row_dimensions[meta_row].height = 20
+
+    # Conclusion block
+    conclusion_row = meta_row + 2
+    conclusion = build_overview_conclusion(
+        summary_rows or [],
+        total_reviews=total_reviews,
+        min_mentions=OVERVIEW_MIN_MENTIONS,
+    )
+    title_c = ws.cell(row=conclusion_row, column=1, value="评论洞察结论")
+    title_c.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
+    body = ws.cell(row=conclusion_row + 1, column=1, value=conclusion)
+    body.font = Font(name="Microsoft YaHei", size=9, color="404040")
+    body.alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells(
+        start_row=conclusion_row + 1,
+        start_column=1,
+        end_row=conclusion_row + 6,
+        end_column=19,
+    )
+    for rr in range(conclusion_row + 1, conclusion_row + 7):
+        ws.row_dimensions[rr].height = 15
 
     ws.column_dimensions["A"].width = 14
     ws.column_dimensions["B"].width = 12
@@ -660,15 +699,26 @@ def _build_overview_sheet(
         ws.column_dimensions[letter].hidden = True
         ws.column_dimensions[letter].width = 12
 
-    upper_start = meta_row + 2
+    upper_start = conclusion_row + 8
     ws.freeze_panes = f"A{upper_start}"
+
+    # Section: 消费者画像 (4 modules)
+    portrait_title_row = upper_start
+    pt = ws.cell(
+        row=portrait_title_row,
+        column=1,
+        value="消费者画像（由评论勾勒：人群 / 用途 / 场景 / 动机）",
+    )
+    pt.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
+    ws.merge_cells(start_row=portrait_title_row, start_column=1, end_row=portrait_title_row, end_column=19)
+    grid_start = portrait_title_row + 2
 
     module_metas: list[dict] = []
     chart_titles: list[str] = []
     for idx, item_type in enumerate(PORTRAIT_TYPES):
         grid_r = idx // 2
         grid_c = idx % 2
-        card_row = upper_start + grid_r * _CARD_ROW_HEIGHT
+        card_row = grid_start + grid_r * _CARD_ROW_HEIGHT
         c1, c2 = _LEFT_CARD_COLS if grid_c == 0 else _RIGHT_CARD_COLS
         hidden_cat = _HIDDEN_START_COL + idx * 2
         hidden_val = hidden_cat + 1
@@ -689,9 +739,19 @@ def _build_overview_sheet(
         if meta.get("chart_title"):
             chart_titles.append(meta["chart_title"])
 
-    feedback_label_row = upper_start + 2 * _CARD_ROW_HEIGHT + 1
-    sec = ws.cell(row=feedback_label_row, column=1, value="反馈洞察")
+    feedback_label_row = grid_start + 2 * _CARD_ROW_HEIGHT + 1
+    sec = ws.cell(
+        row=feedback_label_row,
+        column=1,
+        value="需求满足分析（用户满意 / 未被满足；与消费者画像分开阅读）",
+    )
     sec.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
+    ws.merge_cells(
+        start_row=feedback_label_row,
+        start_column=1,
+        end_row=feedback_label_row,
+        end_column=19,
+    )
     panel_start = feedback_label_row + 1
 
     left_rows = _write_feedback_panel(
