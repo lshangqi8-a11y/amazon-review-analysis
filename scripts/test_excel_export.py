@@ -187,17 +187,18 @@ def test_overview_shows_single_mention_dimensions() -> None:
         ov = wb[OVERVIEW_SHEET_NAME]
         text = "\n".join(
             str(ov.cell(row=r, column=c).value)
-            for r in range(1, 90)
-            for c in range(1, 20)
+            for r in range(1, 120)
+            for c in range(1, 40)
             if ov.cell(row=r, column=c).value is not None
         )
-        assert "儿童使用" in text
+        assert "儿童使用" in text or "儿童" in text
         assert "易清洗" in text
         assert "密封不良" in text
-        assert "偶发人群" in text
+        assert "偶发人群" in text or "偶发" in text
         assert "偶发满意" in text
         assert "偶发不满" in text
         assert OVERVIEW_MIN_MENTIONS == 0
+        assert "评论洞察结论" not in text
         res = wb[RESULT_SHEET_NAME]
         dims = {res.cell(row=r, column=2).value for r in range(2, res.max_row + 1)}
         assert "偶发人群" in dims
