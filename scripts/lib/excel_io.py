@@ -24,7 +24,7 @@ from .constants import (
     RESULT_SHEET_NAME,
     TYPE_DISPLAY_LABELS,
 )
-from .statistics import build_overview_conclusion, build_theme_insight_summary
+from .statistics import build_theme_insight_summary
 TITLE_HEADER_CANDIDATES = [
     "标题",
     "评论标题",
@@ -476,9 +476,14 @@ def _write_portrait_module(
         top_n,
         min_mentions=OVERVIEW_MIN_MENTIONS,
     )
-    sub_text = f"主维度（提及≥{OVERVIEW_MIN_MENTIONS}）· 共 {len(top_rows)} 项 · 提及频率"
-    if top_n is not None:
-        sub_text = f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · 提及频率"
+    if OVERVIEW_MIN_MENTIONS and OVERVIEW_MIN_MENTIONS > 0:
+        sub_text = f"提及≥{OVERVIEW_MIN_MENTIONS} · 共 {len(top_rows)} 项 · 提及频率"
+        if top_n is not None:
+            sub_text = f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · 提及频率"
+    else:
+        sub_text = f"共 {len(top_rows)} 项 · 提及频率"
+        if top_n is not None:
+            sub_text = f"Top {top_n} · 提及频率"
     sub = ws.cell(row=card_row + 2, column=card_col_start, value=sub_text)
     sub.font = Font(name="Microsoft YaHei", size=9, color="808080")
     sub.fill = _CARD_FILL
@@ -664,50 +669,27 @@ def _build_overview_sheet(
     ws.merge_cells("A1:I1")
     ws.row_dimensions[1].height = 28
 
-    # One compact meta row (optional product fields + three stats)
+    # One compact meta line (no conclusion block)
     meta_row = 3
     product_name = str(product_name or "").strip()
     product_category = str(product_category or "").strip()
-    label_font = Font(name="Microsoft YaHei", bold=True, size=10)
-    main_dim_count = sum(
-        1 for r in (summary_rows or []) if int(r.get("mention_count") or 0) >= OVERVIEW_MIN_MENTIONS
+    parts: list[str] = []
+    if product_name:
+        parts.append(f"产品名称：{product_name}")
+    if product_category:
+        parts.append(f"产品类目：{product_category}")
+    parts.extend(
+        [
+            f"评论总数：{int(total_reviews or 0)}",
+            f"评论洞察条目数：{int(voc_items or 0)}",
+            f"标准维度数：{len(summary_rows or [])}",
+        ]
     )
-    col = 1
-    for label, value, show in (
-        ("产品名称", product_name, bool(product_name)),
-        ("产品类目", product_category, bool(product_category)),
-        ("评论总数", int(total_reviews or 0), True),
-        ("评论洞察条目数", int(voc_items or 0), True),
-        ("标准维度数", len(summary_rows or []), True),
-        ("主维度数", main_dim_count, True),
-    ):
-        if not show:
-            continue
-        ws.cell(row=meta_row, column=col, value=label).font = label_font
-        ws.cell(row=meta_row, column=col + 1, value=value).font = _BODY_FONT
-        col += 2
-    ws.row_dimensions[meta_row].height = 20
-
-    # Conclusion block
-    conclusion_row = meta_row + 2
-    conclusion = build_overview_conclusion(
-        summary_rows or [],
-        total_reviews=total_reviews,
-        min_mentions=OVERVIEW_MIN_MENTIONS,
-    )
-    title_c = ws.cell(row=conclusion_row, column=1, value="评论洞察结论")
-    title_c.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
-    body = ws.cell(row=conclusion_row + 1, column=1, value=conclusion)
-    body.font = Font(name="Microsoft YaHei", size=9, color="404040")
-    body.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.merge_cells(
-        start_row=conclusion_row + 1,
-        start_column=1,
-        end_row=conclusion_row + 6,
-        end_column=19,
-    )
-    for rr in range(conclusion_row + 1, conclusion_row + 7):
-        ws.row_dimensions[rr].height = 15
+    meta = ws.cell(row=meta_row, column=1, value="　　".join(parts))
+    meta.font = Font(name="Microsoft YaHei", size=10, color="404040")
+    meta.alignment = Alignment(vertical="center", wrap_text=False)
+    ws.merge_cells(start_row=meta_row, start_column=1, end_row=meta_row, end_column=19)
+    ws.row_dimensions[meta_row].height = 22
 
     ws.column_dimensions["A"].width = 14
     ws.column_dimensions["B"].width = 12
@@ -730,7 +712,7 @@ def _build_overview_sheet(
         ws.column_dimensions[letter].hidden = True
         ws.column_dimensions[letter].width = 12
 
-    upper_start = conclusion_row + 8
+    upper_start = meta_row + 2
     ws.freeze_panes = f"A{upper_start}"
 
     # Section: 消费者画像 (4 modules)

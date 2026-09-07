@@ -17,7 +17,7 @@ from lib.excel_io import (
     type_display_label,
     write_analysis_workbook,
 )
-from lib.statistics import build_overview_conclusion, build_theme_insight_summary
+from lib.statistics import build_theme_insight_summary
 
 
 def _row(
@@ -100,10 +100,12 @@ def test_dashboard_full() -> None:
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
 
-        assert ov.cell(row=3, column=1).value == "评论总数"
-        assert ov.cell(row=3, column=3).value == "评论洞察条目数"
-        assert ov.cell(row=3, column=5).value == "标准维度数"
-        assert ov.cell(row=3, column=7).value == "主维度数"
+        assert ov.cell(row=3, column=1).value
+        meta_line = str(ov.cell(row=3, column=1).value)
+        assert "评论总数：100" in meta_line
+        assert "评论洞察条目数：40" in meta_line
+        assert "标准维度数：" in meta_line
+        assert "主维度数" not in meta_line
 
         visible_vals = []
         for r in range(1, 100):
@@ -114,13 +116,13 @@ def test_dashboard_full() -> None:
         joined = "\n".join(visible_vals)
         assert "消费者画像" in joined
         assert "需求满足分析" in joined
-        assert "评论洞察结论" in joined
+        assert "评论洞察结论" not in joined
         assert "具体维度" not in visible_vals
         assert "VOC提炼条目数" not in joined
         assert "未被满足" in joined
         assert "用户满意" in joined
         assert "用户不满" not in joined
-        assert any(f"提及≥{OVERVIEW_MIN_MENTIONS}" in v or "主维度" in v for v in visible_vals)
+        assert any("项 · 提及频率" in v or "提及频率" in v for v in visible_vals)
 
         assert len(ov._charts) == 4
         for ch in ov._charts:
@@ -158,7 +160,7 @@ def test_empty_portrait_modules() -> None:
         assert {m["type"] for m in empty} == {"产品用途", "使用场景"}
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
-        assert ov.cell(row=3, column=1).value == "产品名称"
+        assert "产品名称：Demo" in str(ov.cell(row=3, column=1).value or "")
         assert "消费者画像" in str(ov.cell(row=5, column=1).value or "") or any(
             ov.cell(row=r, column=1).value and "消费者画像" in str(ov.cell(row=r, column=1).value)
             for r in range(1, 30)
@@ -166,7 +168,7 @@ def test_empty_portrait_modules() -> None:
         wb.close()
 
 
-def test_min_mentions_filters_overview_ones() -> None:
+def test_overview_shows_single_mention_dimensions() -> None:
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
         src = td_path / "in.xlsx"
@@ -192,30 +194,19 @@ def test_min_mentions_filters_overview_ones() -> None:
         assert "儿童使用" in text
         assert "易清洗" in text
         assert "密封不良" in text
-        assert "偶发人群" not in text
-        assert "偶发满意" not in text
-        assert "偶发不满" not in text
-        # result sheet keeps long-tail
+        assert "偶发人群" in text
+        assert "偶发满意" in text
+        assert "偶发不满" in text
+        assert OVERVIEW_MIN_MENTIONS == 0
         res = wb[RESULT_SHEET_NAME]
         dims = {res.cell(row=r, column=2).value for r in range(2, res.max_row + 1)}
         assert "偶发人群" in dims
         wb.close()
 
 
-def test_conclusion_and_display() -> None:
+def test_display_labels() -> None:
     assert type_display_label("用户不满") == "未被满足"
     assert PORTRAIT_TYPES == ["消费人群", "产品用途", "使用场景", "购买动机"]
-    text = build_overview_conclusion(
-        [
-            _row("消费人群", "儿童使用", 12, 40.0, "孩子用"),
-            _row("用户满意", "易清洗", 5, 16.7, "好洗"),
-            _row("用户不满", "切割不净", 4, 13.3, "切不干净"),
-        ],
-        total_reviews=30,
-    )
-    assert "消费者画像" in text
-    assert "需求满足" in text
-    assert "儿童使用" in text
 
 
 def test_guess_product() -> None:
@@ -233,9 +224,9 @@ def test_guess_product() -> None:
 
 
 if __name__ == "__main__":
-    test_conclusion_and_display()
+    test_display_labels()
     test_guess_product()
     test_dashboard_full()
     test_empty_portrait_modules()
-    test_min_mentions_filters_overview_ones()
+    test_overview_shows_single_mention_dimensions()
     print("ALL_TESTS_PASSED")

@@ -64,7 +64,8 @@ def filter_main_dimensions(
     *,
     min_mentions: int = OVERVIEW_MIN_MENTIONS,
 ) -> list[dict]:
-    threshold = max(1, int(min_mentions or 1))
+    # 0 = keep all rows that have any positive mention count
+    threshold = max(1, int(min_mentions)) if int(min_mentions or 0) > 0 else 1
     return [r for r in (summary_rows or []) if int(r.get("mention_count") or 0) >= threshold]
 
 
@@ -74,11 +75,15 @@ def build_overview_conclusion(
     total_reviews: int = 0,
     min_mentions: int = OVERVIEW_MIN_MENTIONS,
 ) -> str:
-    """Deterministic one-page conclusion from main dimensions."""
+    """Deterministic one-page conclusion from overview dimensions."""
     main = filter_main_dimensions(summary_rows, min_mentions=min_mentions)
     total = max(0, int(total_reviews or 0))
-    thr = max(1, int(min_mentions or 1))
-    lines = [f"基于 {total} 条评论的评论洞察结论（总览仅展示提及≥{thr} 的主维度）："]
+    thr = int(min_mentions or 0)
+    if thr > 1:
+        head = f"基于 {total} 条评论的评论洞察结论（总览仅展示提及≥{thr} 的维度）："
+    else:
+        head = f"基于 {total} 条评论的评论洞察结论："
+    lines = [head]
 
     def tops(item_type: str, n: int = 3) -> list[dict]:
         rows = [r for r in main if (r.get("item_type") or "") == item_type]
@@ -136,7 +141,8 @@ def aggregate_statistics(items: list[dict], total_reviews: int) -> list[dict]:
             "representative_feedback": feedback,
         }
         item["theme_summary"] = build_theme_insight_summary(item)
-        item["is_main_dimension"] = count >= int(OVERVIEW_MIN_MENTIONS or 2)
+        thr = int(OVERVIEW_MIN_MENTIONS or 0)
+        item["is_main_dimension"] = count >= (thr if thr > 0 else 1)
         rows.append(item)
     rows.sort(
         key=lambda x: (
