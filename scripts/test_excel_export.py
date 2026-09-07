@@ -114,7 +114,7 @@ def test_dashboard_full() -> None:
                 if v is not None:
                     visible_vals.append(str(v))
         joined = "\n".join(visible_vals)
-        assert "消费者画像" in joined
+        assert "消费者画像" not in joined
         assert "需求满足分析" in joined
         assert "评论洞察结论" not in joined
         assert "具体维度" not in visible_vals
@@ -161,8 +161,8 @@ def test_empty_portrait_modules() -> None:
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
         assert "产品名称：Demo" in str(ov.cell(row=3, column=1).value or "")
-        assert "消费者画像" in str(ov.cell(row=5, column=1).value or "") or any(
-            ov.cell(row=r, column=1).value and "消费者画像" in str(ov.cell(row=r, column=1).value)
+        assert any(
+            ov.cell(row=r, column=1).value and "消费人群" in str(ov.cell(row=r, column=1).value)
             for r in range(1, 30)
         )
         wb.close()

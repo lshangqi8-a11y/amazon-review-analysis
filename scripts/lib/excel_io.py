@@ -715,16 +715,8 @@ def _build_overview_sheet(
     upper_start = meta_row + 2
     ws.freeze_panes = f"A{upper_start}"
 
-    # Section: 消费者画像 (4 modules)
-    portrait_title_row = upper_start
-    pt = ws.cell(
-        row=portrait_title_row,
-        column=1,
-        value="消费者画像（由评论勾勒：人群 / 用途 / 场景 / 动机）",
-    )
-    pt.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
-    ws.merge_cells(start_row=portrait_title_row, start_column=1, end_row=portrait_title_row, end_column=19)
-    grid_start = portrait_title_row + 2
+    # Portrait modules (2×2) — no section banner
+    grid_start = upper_start
 
     module_metas: list[dict] = []
     chart_titles: list[str] = []
