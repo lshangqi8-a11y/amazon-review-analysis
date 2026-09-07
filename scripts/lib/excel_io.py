@@ -370,15 +370,21 @@ def _add_portrait_column_chart(
     cat_col: int,
     value_col: int,
     anchor: str,
+    y_max: float | None = None,
 ) -> None:
     chart = BarChart()
     chart.type = "col"
     chart.style = 10
     chart.title = title
+    # Critical: helper data lives in hidden columns; Excel skips them when True.
+    chart.visible_cells_only = False
     chart.y_axis.title = None
     chart.x_axis.title = None
     chart.y_axis.numFmt = "0%"
     chart.y_axis.scaling.min = 0
+    if y_max is not None and y_max > 0:
+        # Pad headroom so small rates remain readable; cap at 100%.
+        chart.y_axis.scaling.max = min(1.0, max(0.05, float(y_max) * 1.25))
     chart.legend = None
     data = Reference(ws, min_col=value_col, min_row=header_row, max_row=data_end_row)
     cats = Reference(ws, min_col=cat_col, min_row=data_start_row, max_row=data_end_row)
@@ -460,6 +466,7 @@ def _write_portrait_module(
     data_end = hidden_header_row + len(top_rows)
     chart_title = f"{display} TOP {top_n}"
     anchor = f"{get_column_letter(card_col_start)}{card_row + 2}"
+    y_max = max(float(item.get("mention_rate") or 0) / 100.0 for item in top_rows)
     _add_portrait_column_chart(
         ws,
         title=chart_title,
@@ -469,6 +476,7 @@ def _write_portrait_module(
         cat_col=hidden_cat_col,
         value_col=hidden_val_col,
         anchor=anchor,
+        y_max=y_max,
     )
     return {
         "type": item_type,

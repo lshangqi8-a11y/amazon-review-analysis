@@ -137,6 +137,7 @@ def test_dashboard_full() -> None:
         assert len(ov._charts) == 4
         for ch in ov._charts:
             assert ch.type == "col"
+            assert ch.visible_cells_only is False
             assert ch.dataLabels is not None
             assert ch.dataLabels.showVal is True
 
