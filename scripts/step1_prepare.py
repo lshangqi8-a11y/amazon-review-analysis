@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-V3 Step 1: read Excel → write persona_batches + fulfillment_batches for dual-pass AI.
+V4 Step 1: read Excel → write persona_batches + fulfillment_batches for dual-pass AI.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -19,6 +20,48 @@ from lib.excel_io import (
     resolve_review_columns,
 )
 from lib.io_util import format_product, read_text, render_template, skill_root, write_json
+
+
+def _looks_like_pipeline_workdir(workdir: Path) -> bool:
+    meta_path = workdir / "meta.json"
+    if not meta_path.is_file():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(meta, dict):
+        return False
+    ver = str(meta.get("skill_version") or "")
+    if not ver.startswith("v"):
+        return False
+    return bool(meta.get("persona_batches") or meta.get("pipeline"))
+
+
+def _prepare_workdir(workdir: Path, *, force: bool) -> None:
+    """
+    Create workdir. Refuse to wipe unknown non-empty dirs unless --force.
+    Previous pipeline workdirs (meta.json skill_version) may be replaced when force
+    or when clearly ours; unknown content requires --force.
+    """
+    if not workdir.exists():
+        workdir.mkdir(parents=True)
+        return
+    try:
+        non_empty = any(workdir.iterdir())
+    except OSError as exc:
+        raise SystemExit(f"无法读取 workdir：{workdir} ({exc})") from exc
+    if not non_empty:
+        return
+    ours = _looks_like_pipeline_workdir(workdir)
+    if force or ours:
+        shutil.rmtree(workdir)
+        workdir.mkdir(parents=True)
+        return
+    raise SystemExit(
+        f"workdir 已存在且非空，且不像本技能流水线目录：{workdir}\n"
+        "请改用空目录，或对确认可覆盖的目录加上 --force。"
+    )
 
 
 def _write_pass_batches(
@@ -75,7 +118,7 @@ def _write_pass_batches(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="V3 prepare dual-pass extract batches")
+    parser = argparse.ArgumentParser(description="V4 prepare dual-pass 8-dim extract batches")
     parser.add_argument("--input", required=True)
     parser.add_argument("--workdir", required=True)
     parser.add_argument("--product-name", default="")
@@ -84,6 +127,11 @@ def main() -> int:
     parser.add_argument("--title-column", default="")
     parser.add_argument("--content-column", default="")
     parser.add_argument("--chunk-size", type=int, default=EXTRACT_CHUNK_LIMIT)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="覆盖已存在的非空 workdir（默认仅允许覆盖本流水线旧目录）",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input).resolve()
@@ -93,9 +141,7 @@ def main() -> int:
     if input_path.suffix.lower() not in {".xlsx", ".xlsm"}:
         raise SystemExit("输入必须是 xlsx")
 
-    if workdir.exists():
-        shutil.rmtree(workdir)
-    workdir.mkdir(parents=True)
+    _prepare_workdir(workdir, force=bool(args.force))
 
     sheet, title_col, content_col = resolve_review_columns(
         input_path,

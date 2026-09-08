@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
-"""One-shot fake-AI e2e for V4."""
+"""
+Optional local smoke: fake AI outputs through the V4 pipeline.
+
+Requires explicit paths (no machine-specific defaults):
+
+  python scripts/_e2e_fake.py --input reviews.xlsx --workdir ./tmp_v4_e2e --output ./out.xlsx
+"""
 from __future__ import annotations
 
+import argparse
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -49,16 +55,33 @@ def fake_fulfill(reviews):
 
 
 def main() -> int:
-    wd = Path(r"d:\skills测试\v4_e2e")
-    if wd.exists():
-        shutil.rmtree(wd)
-    inp = Path(r"C:\Users\Administrator\Downloads\B0DKFHWTZM.xlsx")
-    subprocess.run(
-        [sys.executable, str(ROOT / "scripts/step1_prepare.py"), "--input", str(inp), "--workdir", str(wd)],
-        check=True,
-    )
+    parser = argparse.ArgumentParser(description="V4 fake-AI end-to-end smoke (local only)")
+    parser.add_argument("--input", required=True, help="Source reviews xlsx")
+    parser.add_argument("--workdir", required=True, help="Working directory for batches")
+    parser.add_argument("--output", required=True, help="Output analysis xlsx")
+    parser.add_argument("--force", action="store_true", help="Pass --force to step1_prepare")
+    args = parser.parse_args()
+
+    wd = Path(args.workdir).resolve()
+    inp = Path(args.input).resolve()
+    out = Path(args.output).resolve()
+    if not inp.exists():
+        raise SystemExit(f"input not found: {inp}")
+
+    cmd1 = [
+        sys.executable,
+        str(ROOT / "scripts/step1_prepare.py"),
+        "--input",
+        str(inp),
+        "--workdir",
+        str(wd),
+    ]
+    if args.force:
+        cmd1.append("--force")
+    subprocess.run(cmd1, check=True)
+
     meta = json.loads((wd / "meta.json").read_text(encoding="utf-8"))
-    assert meta["skill_version"] == "v4"
+    assert meta.get("skill_version") == "v4"
     for b in meta["persona_batches"]:
         bdir = wd / b["path"]
         exp = json.loads((bdir / "expected_ids.json").read_text(encoding="utf-8"))
@@ -73,11 +96,14 @@ def main() -> int:
             json.dumps(fake_fulfill(exp["reviews"]), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    subprocess.run([sys.executable, str(ROOT / "scripts/step2_ingest_persona.py"), "--workdir", str(wd)], check=True)
     subprocess.run(
-        [sys.executable, str(ROOT / "scripts/step3_ingest_fulfillment.py"), "--workdir", str(wd)], check=True
+        [sys.executable, str(ROOT / "scripts/step2_ingest_persona.py"), "--workdir", str(wd)],
+        check=True,
     )
-    out = Path(r"d:\skills测试\B0DKFHWTZM-评论洞察分析-v4-e2e.xlsx")
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/step3_ingest_fulfillment.py"), "--workdir", str(wd)],
+        check=True,
+    )
     subprocess.run(
         [
             sys.executable,

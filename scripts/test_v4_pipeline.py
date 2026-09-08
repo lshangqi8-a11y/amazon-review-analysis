@@ -87,11 +87,48 @@ def test_validate_persona_rejects_fulfillment_type() -> None:
     assert err and "非法类型" in err
 
 
+def test_workdir_refuse_unknown_nonempty() -> None:
+    import json
+    import tempfile
+    from pathlib import Path
+
+    from step1_prepare import _looks_like_pipeline_workdir, _prepare_workdir
+
+    with tempfile.TemporaryDirectory() as td:
+        foreign = Path(td) / "foreign"
+        foreign.mkdir()
+        (foreign / "notes.txt").write_text("keep me", encoding="utf-8")
+        try:
+            _prepare_workdir(foreign, force=False)
+            raise AssertionError("expected SystemExit")
+        except SystemExit as exc:
+            assert "非空" in str(exc) or "不像" in str(exc)
+        assert (foreign / "notes.txt").exists()
+
+        ours = Path(td) / "ours"
+        ours.mkdir()
+        (ours / "meta.json").write_text(
+            json.dumps(
+                {
+                    "skill_version": "v4",
+                    "pipeline": "dual_pass_8dim",
+                    "persona_batches": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert _looks_like_pipeline_workdir(ours)
+        _prepare_workdir(ours, force=False)
+        assert ours.is_dir()
+        assert not (ours / "meta.json").exists()
+
+
 if __name__ == "__main__":
     test_type_sets()
     test_persona_gatekeep()
     test_fulfillment_gatekeep()
     test_validate_persona_rejects_fulfillment_type()
+    test_workdir_refuse_unknown_nonempty()
     import test_excel_export as tex
 
     tex.test_display_labels()

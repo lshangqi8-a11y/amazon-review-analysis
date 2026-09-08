@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""V3 Step 2: ingest persona_batches → persona_items.json"""
+"""V4 Step 2: ingest persona_batches → persona_items.json"""
 from __future__ import annotations
 
 import argparse
@@ -20,7 +20,7 @@ from lib.io_util import read_json, write_json
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="V3 ingest persona AI outputs")
+    parser = argparse.ArgumentParser(description="V4 ingest persona AI outputs")
     parser.add_argument("--workdir", required=True)
     args = parser.parse_args()
     workdir = Path(args.workdir).resolve()

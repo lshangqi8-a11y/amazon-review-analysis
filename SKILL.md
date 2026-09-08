@@ -33,6 +33,7 @@ description: >-
 
 ```bash
 python "$SKILL_ROOT/scripts/step1_prepare.py" --input "reviews.xlsx" --workdir "$WORKDIR"
+# 若 workdir 已存在且非本流水线目录，需加 --force；本流水线旧目录可直接覆盖
 # AI → persona_batches/*/MODEL_OUTPUT.json
 python "$SKILL_ROOT/scripts/step2_ingest_persona.py" --workdir "$WORKDIR"
 # AI → fulfillment_batches/*/MODEL_OUTPUT.json

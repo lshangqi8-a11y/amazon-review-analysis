@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-V3 Step 4: merge persona + fulfillment → stats → Excel overview/result.
+V4 Step 4: merge persona + fulfillment → stats → Excel overview/result.
 No AI normalize pass: labels come from dual-pass extract + gatekeep.
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from lib.statistics import aggregate_statistics
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="V3 finalize analysis workbook")
+    parser = argparse.ArgumentParser(description="V4 finalize analysis workbook")
     parser.add_argument("--workdir", required=True)
     parser.add_argument("--output", default="")
     args = parser.parse_args()
