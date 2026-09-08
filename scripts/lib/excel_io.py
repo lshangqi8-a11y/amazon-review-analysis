@@ -327,17 +327,21 @@ def _first_representative_feedback(text: str) -> str:
     return t
 
 
-def _rate_count_label(item: dict) -> str:
+def _rate_count_label(item: dict, total_reviews: int = 0) -> str:
     rate = float(item.get("mention_rate") or 0)
     count = int(item.get("mention_count") or 0)
-    return f"{rate:.2f}% ({count})"
+    total = int(total_reviews or 0)
+    if total > 0:
+        return f"{rate:.2f}%（{count}/{total}）"
+    return f"{rate:.2f}%（{count}）"
 
 
 # Dashboard layout
 PORTRAIT_TYPES = ["消费人群", "产品用途", "使用场景", "购买动机"]
-_CARD_ROW_HEIGHT = 22
+_CARD_ROW_HEIGHT = 28
 _CHART_WIDTH = 14.0
-_CHART_HEIGHT = 9.0
+_CHART_HEIGHT = 7.2
+_EVIDENCE_MAX_ROWS = 6
 _LEFT_CARD_COLS = (1, 9)  # A:I
 _RIGHT_CARD_COLS = (11, 19)  # K:S
 _HIDDEN_START_COL = 24  # X
@@ -440,6 +444,7 @@ def _write_portrait_module(
     hidden_cat_col: int,
     hidden_val_col: int,
     hidden_header_row: int,
+    total_reviews: int = 0,
 ) -> dict:
     top_n = _overview_limit_for_type(item_type)
     display = type_display_label(item_type)
@@ -468,7 +473,7 @@ def _write_portrait_module(
         end_row=card_row + 1,
         end_column=card_col_end,
     )
-    ws.row_dimensions[card_row + 1].height = 28
+    ws.row_dimensions[card_row + 1].height = 32
 
     top_rows = _top_rows_for_type(
         summary_rows or [],
@@ -476,17 +481,34 @@ def _write_portrait_module(
         top_n,
         min_mentions=OVERVIEW_MIN_MENTIONS,
     )
+    total = int(total_reviews or 0)
     if OVERVIEW_MIN_MENTIONS and OVERVIEW_MIN_MENTIONS > 0:
-        sub_text = f"提及≥{OVERVIEW_MIN_MENTIONS} · 共 {len(top_rows)} 项 · 提及频率"
+        sub_text = (
+            f"提及≥{OVERVIEW_MIN_MENTIONS} · 共 {len(top_rows)} 项 · "
+            f"柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
+        )
         if top_n is not None:
-            sub_text = f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · 提及频率"
+            sub_text = (
+                f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · "
+                f"柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
+            )
     else:
-        sub_text = f"共 {len(top_rows)} 项 · 提及频率"
+        sub_text = (
+            f"共 {len(top_rows)} 项 · 柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
+        )
         if top_n is not None:
-            sub_text = f"Top {top_n} · 提及频率"
+            sub_text = (
+                f"Top {top_n} · 柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
+            )
     sub = ws.cell(row=card_row + 2, column=card_col_start, value=sub_text)
     sub.font = Font(name="Microsoft YaHei", size=9, color="808080")
     sub.fill = _CARD_FILL
+    ws.merge_cells(
+        start_row=card_row + 2,
+        start_column=card_col_start,
+        end_row=card_row + 2,
+        end_column=card_col_end,
+    )
 
     if not top_rows:
         msg_row = card_row + (_CARD_ROW_HEIGHT // 2)
@@ -507,7 +529,7 @@ def _write_portrait_module(
     for i, item in enumerate(top_rows):
         r = hidden_header_row + 1 + i
         dim = str(item.get("dimension") or "")
-        ws.cell(row=r, column=hidden_cat_col, value=_truncate_label(dim, 12))
+        ws.cell(row=r, column=hidden_cat_col, value=_truncate_label(dim, 14))
         rate_cell = ws.cell(
             row=r,
             column=hidden_val_col,
@@ -521,7 +543,7 @@ def _write_portrait_module(
         chart_title = f"{display}（{len(top_rows)}）"
     else:
         chart_title = f"{display} TOP {top_n}"
-    # Chart below title + description + meta line
+    # Chart below title + description + meta; leave lower rows for evidence
     anchor = f"{get_column_letter(card_col_start)}{card_row + 3}"
     y_max = max(float(item.get("mention_rate") or 0) / 100.0 for item in top_rows)
     _add_portrait_column_chart(
@@ -535,6 +557,58 @@ def _write_portrait_module(
         anchor=anchor,
         y_max=y_max,
     )
+
+    # Evidence strip under chart: dimension + n/total + one representative feedback
+    evidence_header_row = card_row + 14
+    eh = ws.cell(
+        row=evidence_header_row,
+        column=card_col_start,
+        value="维度明细（频率 = 提及数/评论总数；可重叠）",
+    )
+    eh.font = Font(name="Microsoft YaHei", size=8, bold=True, color="1F4E79")
+    eh.fill = _CARD_FILL
+    ws.merge_cells(
+        start_row=evidence_header_row,
+        start_column=card_col_start,
+        end_row=evidence_header_row,
+        end_column=card_col_end,
+    )
+
+    evidence_rows = top_rows[:_EVIDENCE_MAX_ROWS]
+    for i, item in enumerate(evidence_rows):
+        r = evidence_header_row + 1 + i
+        dim = str(item.get("dimension") or "")
+        metric = _rate_count_label(item, total)
+        fb = _first_representative_feedback(
+            item.get("representative_feedback")
+            or item.get("core_description")
+            or item.get("theme_summary")
+            or ""
+        )
+        line = f"{dim}　{metric}"
+        if fb:
+            line = f"{line}　｜　{fb}"
+        cell = ws.cell(row=r, column=card_col_start, value=line)
+        cell.font = Font(name="Microsoft YaHei", size=8, color="404040")
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+        cell.fill = _CARD_FILL
+        ws.merge_cells(
+            start_row=r,
+            start_column=card_col_start,
+            end_row=r,
+            end_column=card_col_end,
+        )
+        ws.row_dimensions[r].height = 28
+
+    if len(top_rows) > _EVIDENCE_MAX_ROWS:
+        more = ws.cell(
+            row=evidence_header_row + 1 + len(evidence_rows),
+            column=card_col_start,
+            value=f"另有 {len(top_rows) - _EVIDENCE_MAX_ROWS} 项见「评论分析结果」",
+        )
+        more.font = Font(name="Microsoft YaHei", size=8, italic=True, color="808080")
+        more.fill = _CARD_FILL
+
     return {
         "type": item_type,
         "title": display,
@@ -566,6 +640,7 @@ def _write_feedback_panel(
     summary_rows: list[dict],
     header_fill: PatternFill,
     databar_color: str,
+    total_reviews: int = 0,
 ) -> int:
     display = type_display_label(item_type)
     top_n = _overview_limit_for_type(item_type)
@@ -625,7 +700,7 @@ def _write_feedback_panel(
         bar_cell.number_format = "0.00%"
         bar_cell.alignment = Alignment(vertical="center")
 
-        metric = ws.cell(row=r, column=metric_c, value=_rate_count_label(item))
+        metric = ws.cell(row=r, column=metric_c, value=_rate_count_label(item, total_reviews))
         metric.font = _METRIC_FONT
         metric.alignment = Alignment(horizontal="left", vertical="center")
 
@@ -739,6 +814,7 @@ def _build_overview_sheet(
             hidden_cat_col=hidden_cat,
             hidden_val_col=hidden_val,
             hidden_header_row=hidden_header_row,
+            total_reviews=total_reviews,
         )
         module_metas.append(meta)
         if meta.get("chart_title"):
@@ -781,6 +857,7 @@ def _build_overview_sheet(
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_NEG,
         databar_color=_DATABAR_NEG,
+        total_reviews=total_reviews,
     )
     right_rows = _write_feedback_panel(
         ws,
@@ -790,6 +867,7 @@ def _build_overview_sheet(
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_POS,
         databar_color=_DATABAR_POS,
+        total_reviews=total_reviews,
     )
 
     return {

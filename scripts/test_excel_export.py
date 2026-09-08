@@ -122,7 +122,9 @@ def test_dashboard_full() -> None:
         assert "未被满足" in joined
         assert "用户满意" in joined
         assert "用户不满" not in joined
-        assert any("项 · 提及频率" in v or "提及频率" in v for v in visible_vals)
+        assert any("下表=提及数" in v or "提及数/" in v for v in visible_vals)
+        assert any("/100）" in v or "/100)" in v for v in visible_vals)
+        assert any("维度明细" in v for v in visible_vals)
 
         assert len(ov._charts) == 4
         for ch in ov._charts:
