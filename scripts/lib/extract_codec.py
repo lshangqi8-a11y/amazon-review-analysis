@@ -49,7 +49,13 @@ def normalize_extract_payload(payload):
     return payload
 
 
-def validate_extract_payload(payload, expected_ids: set[str]) -> str:
+def validate_extract_payload(
+    payload,
+    expected_ids: set[str],
+    *,
+    allowed_types: set[str] | None = None,
+) -> str:
+    allowed = allowed_types if allowed_types is not None else ALLOWED_TYPES
     payload = normalize_extract_payload(payload)
     if not isinstance(payload, dict):
         return "抽取结果不是 JSON 对象"
@@ -74,8 +80,8 @@ def validate_extract_payload(payload, expected_ids: set[str]) -> str:
             t, d, s = extract_item_fields(ex)
             if not t or not d or not s:
                 return f"{rid} 的 item 必须包含中文字段：类型/单条提炼/原始维度"
-            if t not in ALLOWED_TYPES:
-                return f"{rid} 存在非法类型：{t}"
+            if t not in allowed:
+                return f"{rid} 存在非法类型：{t}（本轮允许：{'/'.join(sorted(allowed))}）"
     missing = expected_ids - found_set
     if missing:
         return f"抽取结果缺少 review_id：{', '.join(sorted(missing)[:8])}"
@@ -87,7 +93,13 @@ def validate_extract_payload(payload, expected_ids: set[str]) -> str:
     return ""
 
 
-def to_internal_voc_payload(payload, expected_ids: set[str] | None = None) -> list[dict]:
+def to_internal_voc_payload(
+    payload,
+    expected_ids: set[str] | None = None,
+    *,
+    allowed_types: set[str] | None = None,
+) -> list[dict]:
+    allowed = allowed_types if allowed_types is not None else ALLOWED_TYPES
     payload = normalize_extract_payload(payload)
     entries = payload.get("results") if isinstance(payload, dict) else payload
     if not isinstance(entries, list):
@@ -111,7 +123,7 @@ def to_internal_voc_payload(payload, expected_ids: set[str] | None = None) -> li
             if not isinstance(ex, dict):
                 continue
             t, d, s = extract_item_fields(ex)
-            if t not in ALLOWED_TYPES or not d or not s:
+            if t not in allowed or not d or not s:
                 continue
             key = (t, d, s)
             if key in item_seen:
@@ -121,7 +133,13 @@ def to_internal_voc_payload(payload, expected_ids: set[str] | None = None) -> li
     return out
 
 
-def internal_to_voc_items(internal: list[dict], chunk: list[dict]) -> list[dict]:
+def internal_to_voc_items(
+    internal: list[dict],
+    chunk: list[dict],
+    *,
+    allowed_types: set[str] | None = None,
+) -> list[dict]:
+    allowed = allowed_types if allowed_types is not None else ALLOWED_TYPES
     by_id = {c["review_id"]: c for c in chunk}
     out = []
     seen = set()
@@ -134,7 +152,7 @@ def internal_to_voc_items(internal: list[dict], chunk: list[dict]) -> list[dict]
             t = str(ex.get("类型") or "").strip()
             d = str(ex.get("原始维度") or "").strip()
             s = str(ex.get("单条提炼") or "").strip()
-            if t not in ALLOWED_TYPES or not d or not s:
+            if t not in allowed or not d or not s:
                 continue
             key = (rid, t, d, s)
             if key in seen:

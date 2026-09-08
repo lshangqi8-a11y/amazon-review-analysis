@@ -1,41 +1,48 @@
 # -*- coding: utf-8 -*-
-"""Portable constants for Amazon review analysis skill scripts."""
+"""Portable constants for Amazon review analysis V3."""
 from __future__ import annotations
 
-VOC_TYPES = [
+PERSONA_TYPES = [
     "消费人群",
     "产品用途",
     "使用场景",
     "购买动机",
+]
+
+FULFILLMENT_TYPES = [
     "用户满意",
     "用户不满",
 ]
 
+VOC_TYPES = PERSONA_TYPES + FULFILLMENT_TYPES
 ALLOWED_TYPES = set(VOC_TYPES)
+PERSONA_ALLOWED = set(PERSONA_TYPES)
+FULFILLMENT_ALLOWED = set(FULFILLMENT_TYPES)
+
 EXTRACT_CHUNK_LIMIT = 50
 REPRESENTATIVE_FEEDBACK_LIMIT = 5
 OVERVIEW_SHEET_NAME = "评论分析总览"
 RESULT_SHEET_NAME = "评论分析结果"
-# Overview: None = no Top-N cut.
 OVERVIEW_TOP_N = None
-# Overview min mention filter. 0 = show all dimensions (no threshold).
 OVERVIEW_MIN_MENTIONS = 0
-# Overview / result sheet display labels (internal type keys unchanged)
+
 TYPE_DISPLAY_LABELS = {
     "用户不满": "未被满足",
 }
-# Overview module blurbs (consumer persona + need fulfillment)
+
 MODULE_DESCRIPTIONS = {
-    "消费人群": "分析评论中提及的主要用户类型及占比（柱顶为频率与提及数/评论总数；可重叠）。",
-    "产品用途": "分析评论中提及的产品用途和使用任务及占比（柱顶为频率与提及数/评论总数；可重叠）。",
-    "使用场景": "分析评论中提及的产品使用环境及占比（柱顶为频率与提及数/评论总数；可重叠）。",
-    "购买动机": "分析买前「因…而买」类原因及占比。评论文体较少写动机，条数偏少属正常；柱顶为频率与提及数/评论总数。",
-    "用户满意": "汇总评论中的正面体验及其提及占比（展示为 频率（提及数/评论总数）），快速识别产品优势。",
-    "用户不满": "汇总评论中的负面体验及其提及占比（展示为 频率（提及数/评论总数）），快速识别核心问题与改进方向。",
+    "消费人群": "消费者画像：谁在使用/为谁购买（柱顶=频率与提及数/评论总数；可重叠）。",
+    "产品用途": "消费者画像：产品被拿来做什么（柱顶=频率与提及数/评论总数；可重叠）。",
+    "使用场景": "消费者画像：在哪里/什么时机使用（柱顶=频率与提及数/评论总数；可重叠）。",
+    "购买动机": "消费者画像：买前为何选择（无买前证据可为空；柱顶=频率与提及数/评论总数）。",
+    "用户满意": "需求满足：正面体验及占比（频率=提及数/评论总数），识别可保留优势。",
+    "用户不满": "需求满足：负面体验及占比（频率=提及数/评论总数），识别改进方向。",
 }
+
 NEED_FULFILLMENT_SECTION_DESC = (
-    "汇总本品评论中的正面与负面体验及其提及占比，快速识别产品优势、核心问题和改进方向。"
+    "汇总正面与负面体验及提及占比，支撑产品优势确认与改进落地（与消费者画像分开阅读）。"
 )
+
 ANALYSIS_SHEET_NAMES = (
     OVERVIEW_SHEET_NAME,
     RESULT_SHEET_NAME,

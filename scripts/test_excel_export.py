@@ -114,7 +114,8 @@ def test_dashboard_full() -> None:
                 if v is not None:
                     visible_vals.append(str(v))
         joined = "\n".join(visible_vals)
-        assert "消费者画像" not in joined
+        # V3: module blurbs may say「消费者画像：…」; no section banner「【消费者画像】」
+        assert "【消费者画像】" not in joined
         assert "需求满足分析" in joined
         assert "评论洞察结论" not in joined
         assert "具体维度" not in visible_vals
