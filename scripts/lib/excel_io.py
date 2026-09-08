@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+import zipfile
+from io import BytesIO
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.chart import BarChart, Reference
@@ -336,15 +339,28 @@ def _rate_count_label(item: dict, total_reviews: int = 0) -> str:
     return f"{rate:.2f}%（{count}）"
 
 
+def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
+    """Compact on-bar label: 7%（7/100）."""
+    rate = float(item.get("mention_rate") or 0)
+    count = int(item.get("mention_count") or 0)
+    total = int(total_reviews or 0)
+    if abs(rate - round(rate)) < 0.05:
+        rate_txt = f"{rate:.0f}"
+    else:
+        rate_txt = f"{rate:.1f}"
+    if total > 0:
+        return f"{rate_txt}%（{count}/{total}）"
+    return f"{rate_txt}%（{count}）"
+
+
 # Dashboard layout
 PORTRAIT_TYPES = ["消费人群", "产品用途", "使用场景", "购买动机"]
-_CARD_ROW_HEIGHT = 28
+_CARD_ROW_HEIGHT = 18
 _CHART_WIDTH = 14.0
-_CHART_HEIGHT = 7.2
-_EVIDENCE_MAX_ROWS = 6
+_CHART_HEIGHT = 9.0
 _LEFT_CARD_COLS = (1, 9)  # A:I
 _RIGHT_CARD_COLS = (11, 19)  # K:S
-_HIDDEN_START_COL = 24  # X
+_HIDDEN_START_COL = 24  # X; each portrait module uses 3 cols: cat/val/label
 _PAGE_FILL = PatternFill("solid", fgColor="F5F5F5")
 _CARD_FILL = PatternFill("solid", fgColor="FFFFFF")
 _CARD_TITLE_FONT = Font(name="Microsoft YaHei", size=12, bold=True, color="1F4E79")
@@ -423,14 +439,136 @@ def _add_portrait_column_chart(
     # Widen slightly when many categories so labels stay readable
     chart.width = _CHART_WIDTH + min(6.0, max(0.0, (n_points - 5) * 0.6))
     chart.height = _CHART_HEIGHT
+    # Values hidden here; custom 6%（6/100） labels injected after save from label cells.
     labels = DataLabelList()
-    labels.showVal = True
+    labels.showVal = False
     labels.showCatName = False
     labels.showSerName = False
     chart.dataLabels = labels
     if chart.series:
         chart.series[0].dLbls = labels
     ws.add_chart(chart, anchor)
+
+
+def _patch_chart_datalabels_from_cells(
+    xlsx_path: Path,
+    label_payloads: list[dict],
+) -> None:
+    """
+    Inject Excel 'Values From Cells' data labels into portrait charts.
+
+    label_payloads: ordered list matching chart1..N, each with:
+      formula: e.g. \"'评论分析总览'!$Z$2:$Z$7\"
+      values: list[str] cached label texts
+    """
+    if not label_payloads:
+        return
+    ns_c = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+    ns_c15 = "http://schemas.microsoft.com/office/drawing/2012/chart"
+    ET.register_namespace("c", ns_c)
+    ET.register_namespace("c15", ns_c15)
+    uri_show = "{CE6537A1-D777-4B75-AEB2-F5D3B9D8D6C5}"
+    uri_range = "{02D57815-91ED-43cb-92C2-25804820EDAC}"
+
+    path = Path(xlsx_path)
+    buf = BytesIO(path.read_bytes())
+    out = BytesIO()
+    with zipfile.ZipFile(buf, "r") as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            m = re.fullmatch(r"xl/charts/chart(\d+)\.xml", info.filename.replace("\\", "/"))
+            if m:
+                idx = int(m.group(1)) - 1
+                if 0 <= idx < len(label_payloads):
+                    data = _inject_datalabel_range_xml(
+                        data,
+                        formula=label_payloads[idx]["formula"],
+                        values=label_payloads[idx]["values"],
+                        ns_c=ns_c,
+                        ns_c15=ns_c15,
+                        uri_show=uri_show,
+                        uri_range=uri_range,
+                    )
+            zout.writestr(info, data)
+    path.write_bytes(out.getvalue())
+
+
+def _inject_datalabel_range_xml(
+    xml_bytes: bytes,
+    *,
+    formula: str,
+    values: list[str],
+    ns_c: str,
+    ns_c15: str,
+    uri_show: str,
+    uri_range: str,
+) -> bytes:
+    root = ET.fromstring(xml_bytes)
+    ser = root.find(f".//{{{ns_c}}}ser")
+    if ser is None:
+        return xml_bytes
+
+    # Ensure dLbls under ser
+    dLbls = ser.find(f"{{{ns_c}}}dLbls")
+    if dLbls is None:
+        dLbls = ET.SubElement(ser, f"{{{ns_c}}}dLbls")
+    for tag, val in (
+        ("showLegendKey", "0"),
+        ("showVal", "0"),
+        ("showCatName", "0"),
+        ("showSerName", "0"),
+        ("showPercent", "0"),
+        ("showBubbleSize", "0"),
+    ):
+        node = dLbls.find(f"{{{ns_c}}}{tag}")
+        if node is None:
+            node = ET.SubElement(dLbls, f"{{{ns_c}}}{tag}")
+        node.set("val", val)
+
+    # dLbls ext: showDataLabelsRange=1
+    d_ext_lst = dLbls.find(f"{{{ns_c}}}extLst")
+    if d_ext_lst is None:
+        d_ext_lst = ET.SubElement(dLbls, f"{{{ns_c}}}extLst")
+    d_ext = None
+    for ext in d_ext_lst.findall(f"{{{ns_c}}}ext"):
+        if ext.get("uri") == uri_show:
+            d_ext = ext
+            break
+    if d_ext is None:
+        d_ext = ET.SubElement(d_ext_lst, f"{{{ns_c}}}ext")
+        d_ext.set("uri", uri_show)
+    show = d_ext.find(f"{{{ns_c15}}}showDataLabelsRange")
+    if show is None:
+        show = ET.SubElement(d_ext, f"{{{ns_c15}}}showDataLabelsRange")
+    show.set("val", "1")
+
+    # ser ext: datalabelsRange + cache
+    s_ext_lst = ser.find(f"{{{ns_c}}}extLst")
+    if s_ext_lst is None:
+        s_ext_lst = ET.SubElement(ser, f"{{{ns_c}}}extLst")
+    s_ext = None
+    for ext in s_ext_lst.findall(f"{{{ns_c}}}ext"):
+        if ext.get("uri") == uri_range:
+            s_ext = ext
+            break
+    if s_ext is None:
+        s_ext = ET.SubElement(s_ext_lst, f"{{{ns_c}}}ext")
+        s_ext.set("uri", uri_range)
+    # clear old
+    for child in list(s_ext):
+        s_ext.remove(child)
+    dl_range = ET.SubElement(s_ext, f"{{{ns_c15}}}datalabelsRange")
+    f_node = ET.SubElement(dl_range, f"{{{ns_c15}}}f")
+    f_node.text = formula
+    cache = ET.SubElement(dl_range, f"{{{ns_c15}}}dlblRangeCache")
+    pt_count = ET.SubElement(cache, f"{{{ns_c}}}ptCount")
+    pt_count.set("val", str(len(values)))
+    for i, text in enumerate(values):
+        pt = ET.SubElement(cache, f"{{{ns_c}}}pt")
+        pt.set("idx", str(i))
+        v = ET.SubElement(pt, f"{{{ns_c}}}v")
+        v.text = text
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def _write_portrait_module(
@@ -443,6 +581,7 @@ def _write_portrait_module(
     summary_rows: list[dict],
     hidden_cat_col: int,
     hidden_val_col: int,
+    hidden_label_col: int,
     hidden_header_row: int,
     total_reviews: int = 0,
 ) -> dict:
@@ -473,7 +612,7 @@ def _write_portrait_module(
         end_row=card_row + 1,
         end_column=card_col_end,
     )
-    ws.row_dimensions[card_row + 1].height = 32
+    ws.row_dimensions[card_row + 1].height = 28
 
     top_rows = _top_rows_for_type(
         summary_rows or [],
@@ -485,21 +624,17 @@ def _write_portrait_module(
     if OVERVIEW_MIN_MENTIONS and OVERVIEW_MIN_MENTIONS > 0:
         sub_text = (
             f"提及≥{OVERVIEW_MIN_MENTIONS} · 共 {len(top_rows)} 项 · "
-            f"柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
+            f"柱顶=频率（提及数/{total or '总数'}，可重叠）"
         )
         if top_n is not None:
             sub_text = (
                 f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · "
-                f"柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
+                f"柱顶=频率（提及数/{total or '总数'}，可重叠）"
             )
     else:
-        sub_text = (
-            f"共 {len(top_rows)} 项 · 柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
-        )
+        sub_text = f"共 {len(top_rows)} 项 · 柱顶=频率（提及数/{total or '总数'}，可重叠）"
         if top_n is not None:
-            sub_text = (
-                f"Top {top_n} · 柱=% · 下表=提及数/{total or '评论总数'}（可重叠）"
-            )
+            sub_text = f"Top {top_n} · 柱顶=频率（提及数/{total or '总数'}，可重叠）"
     sub = ws.cell(row=card_row + 2, column=card_col_start, value=sub_text)
     sub.font = Font(name="Microsoft YaHei", size=9, color="808080")
     sub.fill = _CARD_FILL
@@ -522,10 +657,18 @@ def _write_portrait_module(
             end_row=msg_row,
             end_column=card_col_end,
         )
-        return {"type": item_type, "title": display, "has_chart": False, "chart_title": None}
+        return {
+            "type": item_type,
+            "title": display,
+            "has_chart": False,
+            "chart_title": None,
+            "label_payload": None,
+        }
 
     ws.cell(row=hidden_header_row, column=hidden_cat_col, value="维度")
     ws.cell(row=hidden_header_row, column=hidden_val_col, value="提及频率")
+    ws.cell(row=hidden_header_row, column=hidden_label_col, value="柱顶标签")
+    label_values: list[str] = []
     for i, item in enumerate(top_rows):
         r = hidden_header_row + 1 + i
         dim = str(item.get("dimension") or "")
@@ -536,6 +679,9 @@ def _write_portrait_module(
             value=float(item.get("mention_rate") or 0) / 100.0,
         )
         rate_cell.number_format = "0.00%"
+        label = _bar_data_label(item, total)
+        ws.cell(row=r, column=hidden_label_col, value=label)
+        label_values.append(label)
 
     data_start = hidden_header_row + 1
     data_end = hidden_header_row + len(top_rows)
@@ -543,7 +689,6 @@ def _write_portrait_module(
         chart_title = f"{display}（{len(top_rows)}）"
     else:
         chart_title = f"{display} TOP {top_n}"
-    # Chart below title + description + meta; leave lower rows for evidence
     anchor = f"{get_column_letter(card_col_start)}{card_row + 3}"
     y_max = max(float(item.get("mention_rate") or 0) / 100.0 for item in top_rows)
     _add_portrait_column_chart(
@@ -558,62 +703,15 @@ def _write_portrait_module(
         y_max=y_max,
     )
 
-    # Evidence strip under chart: dimension + n/total + one representative feedback
-    evidence_header_row = card_row + 14
-    eh = ws.cell(
-        row=evidence_header_row,
-        column=card_col_start,
-        value="维度明细（频率 = 提及数/评论总数；可重叠）",
-    )
-    eh.font = Font(name="Microsoft YaHei", size=8, bold=True, color="1F4E79")
-    eh.fill = _CARD_FILL
-    ws.merge_cells(
-        start_row=evidence_header_row,
-        start_column=card_col_start,
-        end_row=evidence_header_row,
-        end_column=card_col_end,
-    )
-
-    evidence_rows = top_rows[:_EVIDENCE_MAX_ROWS]
-    for i, item in enumerate(evidence_rows):
-        r = evidence_header_row + 1 + i
-        dim = str(item.get("dimension") or "")
-        metric = _rate_count_label(item, total)
-        fb = _first_representative_feedback(
-            item.get("representative_feedback")
-            or item.get("core_description")
-            or item.get("theme_summary")
-            or ""
-        )
-        line = f"{dim}　{metric}"
-        if fb:
-            line = f"{line}　｜　{fb}"
-        cell = ws.cell(row=r, column=card_col_start, value=line)
-        cell.font = Font(name="Microsoft YaHei", size=8, color="404040")
-        cell.alignment = Alignment(wrap_text=True, vertical="center")
-        cell.fill = _CARD_FILL
-        ws.merge_cells(
-            start_row=r,
-            start_column=card_col_start,
-            end_row=r,
-            end_column=card_col_end,
-        )
-        ws.row_dimensions[r].height = 28
-
-    if len(top_rows) > _EVIDENCE_MAX_ROWS:
-        more = ws.cell(
-            row=evidence_header_row + 1 + len(evidence_rows),
-            column=card_col_start,
-            value=f"另有 {len(top_rows) - _EVIDENCE_MAX_ROWS} 项见「评论分析结果」",
-        )
-        more.font = Font(name="Microsoft YaHei", size=8, italic=True, color="808080")
-        more.fill = _CARD_FILL
-
+    sheet = OVERVIEW_SHEET_NAME.replace("'", "''")
+    label_letter = get_column_letter(hidden_label_col)
+    formula = f"'{sheet}'!${label_letter}${data_start}:${label_letter}${data_end}"
     return {
         "type": item_type,
         "title": display,
         "has_chart": True,
         "chart_title": chart_title,
+        "label_payload": {"formula": formula, "values": label_values},
     }
 
 
@@ -782,10 +880,10 @@ def _build_overview_sheet(
     for letter in ("O", "P", "Q", "R", "S"):
         ws.column_dimensions[letter].width = 12
 
-    for col_i in range(_HIDDEN_START_COL, _HIDDEN_START_COL + 8):
+    for col_i in range(_HIDDEN_START_COL, _HIDDEN_START_COL + 12):
         letter = get_column_letter(col_i)
         ws.column_dimensions[letter].hidden = True
-        ws.column_dimensions[letter].width = 12
+        ws.column_dimensions[letter].width = 14
 
     upper_start = meta_row + 2
     ws.freeze_panes = f"A{upper_start}"
@@ -795,14 +893,16 @@ def _build_overview_sheet(
 
     module_metas: list[dict] = []
     chart_titles: list[str] = []
+    label_payloads: list[dict] = []
     for idx, item_type in enumerate(PORTRAIT_TYPES):
         grid_r = idx // 2
         grid_c = idx % 2
         card_row = grid_start + grid_r * _CARD_ROW_HEIGHT
         c1, c2 = _LEFT_CARD_COLS if grid_c == 0 else _RIGHT_CARD_COLS
-        hidden_cat = _HIDDEN_START_COL + idx * 2
+        hidden_cat = _HIDDEN_START_COL + idx * 3
         hidden_val = hidden_cat + 1
-        # Each portrait module uses its own hidden column pair; all start at row 1
+        hidden_label = hidden_cat + 2
+        # Each portrait module uses its own hidden column triple; all start at row 1
         hidden_header_row = 1
         meta = _write_portrait_module(
             ws,
@@ -813,12 +913,15 @@ def _build_overview_sheet(
             summary_rows=summary_rows or [],
             hidden_cat_col=hidden_cat,
             hidden_val_col=hidden_val,
+            hidden_label_col=hidden_label,
             hidden_header_row=hidden_header_row,
             total_reviews=total_reviews,
         )
         module_metas.append(meta)
         if meta.get("chart_title"):
             chart_titles.append(meta["chart_title"])
+        if meta.get("label_payload"):
+            label_payloads.append(meta["label_payload"])
 
     feedback_label_row = grid_start + 2 * _CARD_ROW_HEIGHT + 1
     sec = ws.cell(
@@ -874,6 +977,7 @@ def _build_overview_sheet(
         "chart_titles": chart_titles,
         "chart_count": len(chart_titles),
         "module_metas": module_metas,
+        "label_payloads": label_payloads,
         "feedback_left_rows": left_rows,
         "feedback_right_rows": right_rows,
         "upper_start": upper_start,
@@ -966,6 +1070,9 @@ def write_analysis_workbook(
     wb.save(output_path)
     sheetnames = list(wb.sheetnames)
     wb.close()
+    payloads = overview_meta.get("label_payloads") or []
+    if payloads:
+        _patch_chart_datalabels_from_cells(Path(output_path), payloads)
     return {
         "sheetnames": sheetnames,
         "chart_titles": overview_meta.get("chart_titles") or [],

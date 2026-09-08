@@ -122,17 +122,26 @@ def test_dashboard_full() -> None:
         assert "未被满足" in joined
         assert "用户满意" in joined
         assert "用户不满" not in joined
-        assert any("下表=提及数" in v or "提及数/" in v for v in visible_vals)
+        assert any("柱顶=频率" in v or "提及数/" in v for v in visible_vals)
         assert any("/100）" in v or "/100)" in v for v in visible_vals)
-        assert any("维度明细" in v for v in visible_vals)
+        assert "维度明细" not in joined
+        assert "｜" not in joined or "需求满足" in joined  # no portrait evidence pipes required
 
         assert len(ov._charts) == 4
         for ch in ov._charts:
             assert ch.type == "col"
             assert ch.visible_cells_only is False
 
-        # Theme summary style (not raw only-first snippet without count framing)
+        # Theme summary style on need panels
         assert any("出现在" in v and "买家反馈" in v for v in visible_vals)
+
+        # On-bar label cache exists in chart XML after save
+        import zipfile
+        from pathlib import Path as P
+        with zipfile.ZipFile(out, "r") as zf:
+            chart_xml = zf.read("xl/charts/chart1.xml").decode("utf-8", errors="ignore")
+        assert "datalabelsRange" in chart_xml or "showDataLabelsRange" in chart_xml
+        assert "（" in chart_xml or "%" in chart_xml
 
         result = wb[RESULT_SHEET_NAME]
         # Full detail retained (including mention=1 rows)
