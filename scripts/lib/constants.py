@@ -1,23 +1,30 @@
 # -*- coding: utf-8 -*-
-"""Portable constants for Amazon review analysis V3."""
+"""Portable constants for Amazon review analysis V4 (8 dimensions)."""
 from __future__ import annotations
 
+# Pass1 — consumer persona (6)
 PERSONA_TYPES = [
     "消费人群",
+    "使用地点",
+    "使用时刻",
     "产品用途",
     "使用场景",
     "购买动机",
 ]
 
+# Pass2 — need fulfillment (2); display name = type name
 FULFILLMENT_TYPES = [
     "用户满意",
-    "用户不满",
+    "未被满足",
 ]
 
 VOC_TYPES = PERSONA_TYPES + FULFILLMENT_TYPES
 ALLOWED_TYPES = set(VOC_TYPES)
 PERSONA_ALLOWED = set(PERSONA_TYPES)
 FULFILLMENT_ALLOWED = set(FULFILLMENT_TYPES)
+
+# Overview: all eight use the same column-chart card style
+OVERVIEW_CHART_TYPES = list(VOC_TYPES)
 
 EXTRACT_CHUNK_LIMIT = 50
 REPRESENTATIVE_FEEDBACK_LIMIT = 5
@@ -26,21 +33,22 @@ RESULT_SHEET_NAME = "评论分析结果"
 OVERVIEW_TOP_N = None
 OVERVIEW_MIN_MENTIONS = 0
 
-TYPE_DISPLAY_LABELS = {
-    "用户不满": "未被满足",
-}
+# Identity map kept for API compatibility (V4 types are already display names)
+TYPE_DISPLAY_LABELS: dict[str, str] = {}
 
 MODULE_DESCRIPTIONS = {
-    "消费人群": "消费者画像：谁在使用/为谁购买（柱顶=频率与提及数/评论总数；可重叠）。",
-    "产品用途": "消费者画像：产品被拿来做什么（柱顶=频率与提及数/评论总数；可重叠）。",
-    "使用场景": "消费者画像：在哪里/什么时机使用（柱顶=频率与提及数/评论总数；可重叠）。",
-    "购买动机": "消费者画像：买前为何选择（无买前证据可为空；柱顶=频率与提及数/评论总数）。",
-    "用户满意": "需求满足：正面体验及占比（频率=提及数/评论总数），识别可保留优势。",
-    "用户不满": "需求满足：负面体验及占比（频率=提及数/评论总数），识别改进方向。",
+    "消费人群": "谁在使用/为谁购买（柱顶=频率与提及数/评论总数；可重叠）。",
+    "使用地点": "在哪里使用（空间场所；柱顶=频率与提及数/评论总数；可重叠）。",
+    "使用时刻": "什么时候使用（时间节律；柱顶=频率与提及数/评论总数；可重叠）。",
+    "产品用途": "产品被拿来做什么任务（柱顶=频率与提及数/评论总数；可重叠）。",
+    "使用场景": "在什么事务/场合情境中使用（柱顶=频率与提及数/评论总数；可重叠）。",
+    "购买动机": "买前为何选择（无买前证据可为空；柱顶=频率与提及数/评论总数）。",
+    "用户满意": "用后正面体验及占比（频率=提及数/评论总数），识别可保留优势。",
+    "未被满足": "用后负面缺口及占比（频率=提及数/评论总数），识别改进方向。",
 }
 
 NEED_FULFILLMENT_SECTION_DESC = (
-    "汇总正面与负面体验及提及占比，支撑产品优势确认与改进落地（与消费者画像分开阅读）。"
+    "汇总正面与负面体验及提及占比，支撑产品优势确认与改进落地。"
 )
 
 ANALYSIS_SHEET_NAMES = (

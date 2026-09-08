@@ -1,6 +1,6 @@
-# Amazon 评论分析 V3
+# Amazon 评论分析 V4
 
-独立版本：双轮分析（消费者画像 → 需求满足），Excel 总览复用成熟图表层。
+8 维双轮分析（画像六维 → 满意/未被满足），Excel 总览八图同款柱状样式。
 
 ## 安装
 
@@ -8,16 +8,12 @@
 pip install -r requirements.txt
 ```
 
-建议路径：`d:\amazon_review_analysis_v3`（git 分支 `v3-dev`）。
-
-## 快速流程
-
-见 [SKILL.md](SKILL.md)。
+路径：`d:\amazon_review_analysis_v4`（分支 `v4-dev`）。流程见 [SKILL.md](SKILL.md)。
 
 ## 版本
 
-见 `VERSION`（3.0.0-beta）。
+见 `VERSION`（4.0.0-beta）。
 
-## 与 V2
+## 与 V3
 
-V2（`amazon_review_analysis_v2` / `v2-dev`）冻结对照；新需求在 V3 迭代。
+V3 为 6 维对照基线；V4 将场景细分为地点/时刻并保留使用场景，类型「用户不满」统一为「未被满足」。

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-"""V3 semi-controlled slots for persona (cross-category, short, auditable)."""
+"""V4 semi-controlled slots (cross-category, short, auditable)."""
 from __future__ import annotations
 
-# 消费人群：身份/阶段/体型/精力/家庭结构（可多选；禁止「适合/不适合」）
 AUDIENCE_SLOT_EXAMPLES = [
     "幼龄使用者",
     "成年使用者",
@@ -17,20 +16,36 @@ AUDIENCE_SLOT_EXAMPLES = [
     "礼品接收对象",
 ]
 
-# 使用场景：场所或时机（禁止体验词、故障词）
-SCENE_SLOT_EXAMPLES = [
-    "室内-居家",
-    "室内-办公",
-    "户外-庭院",
-    "户外-通用",
-    "出行-车内",
-    "出行-旅行",
-    "时机-无法外出时",
-    "时机-日常碎片时间",
-    "公共场所",
+LOCATION_SLOT_EXAMPLES = [
+    "厨房",
+    "台面",
+    "水槽旁",
+    "居家室内",
+    "庭院/户外",
+    "车内",
+    "办公室",
+    "浴室",
 ]
 
-# 购买动机：仅买前因果（可空）
+TIME_SLOT_EXAMPLES = [
+    "每天",
+    "一天多次",
+    "早晨",
+    "夜间",
+    "碎片时间",
+    "无法外出时",
+]
+
+# 使用场景 = 事务/场合情境（不是地点、不是时刻、不是具体动作任务名的重复）
+SCENE_SLOT_EXAMPLES = [
+    "日常清洁养护",
+    "礼赠场合",
+    "出行旅行",
+    "夜间喂养照护",
+    "居家娱乐互动",
+    "训练/工作辅助",
+]
+
 MOTIVE_SLOT_EXAMPLES = [
     "价格吸引",
     "促销吸引",
@@ -45,8 +60,7 @@ MOTIVE_SLOT_EXAMPLES = [
     "解决特定痛点而购",
 ]
 
-# 产品用途：任务导向，允许比上三类更开放，但应短且可审计
 PURPOSE_GUIDANCE = (
-    "用2-8字任务名，如：消耗精力、训犬训练、娱乐互动、收纳整理、切割备菜。"
+    "用2-8字任务名，如：消耗精力、清洗奶瓶、清洁泵配件、娱乐互动、收纳整理。"
     "不同任务分开；禁止空泛「使用/好玩」。"
 )

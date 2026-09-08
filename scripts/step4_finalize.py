@@ -49,7 +49,7 @@ def main() -> int:
     )
 
     result = {
-        "skill_version": "v3",
+        "skill_version": "v4",
         "output_file": str(out),
         "total_reviews": total_reviews,
         "persona_items": len(persona),

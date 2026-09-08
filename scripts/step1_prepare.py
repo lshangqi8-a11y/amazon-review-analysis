@@ -141,8 +141,8 @@ def main() -> int:
     write_json(
         workdir / "meta.json",
         {
-            "skill_version": "v3",
-            "pipeline": "dual_pass",
+            "skill_version": "v4",
+            "pipeline": "dual_pass_8dim",
             "input_file": str(input_path),
             "sheet_name": sheet,
             "title_column": title_col,
@@ -162,11 +162,11 @@ def main() -> int:
     write_json(workdir / "reviews.json", reviews)
 
     print(f"workdir={workdir}")
-    print(f"total_reviews={len(reviews)} ai_reviews={len(ai_reviews)}")
+    print(f"skill_version=v4 total_reviews={len(reviews)} ai_reviews={len(ai_reviews)}")
     print(f"persona_batches={len(persona_batches)} fulfillment_batches={len(fulfillment_batches)}")
-    print("NEXT: Fill persona_batches/*/MODEL_OUTPUT.json (Pass1 消费者画像)")
+    print("NEXT: Fill persona_batches/*/MODEL_OUTPUT.json (Pass1 画像六维)")
     print("THEN: python scripts/step2_ingest_persona.py --workdir ...")
-    print("THEN: Fill fulfillment_batches/*/MODEL_OUTPUT.json (Pass2 需求满足)")
+    print("THEN: Fill fulfillment_batches/*/MODEL_OUTPUT.json (Pass2 满意/未被满足)")
     print("THEN: python scripts/step3_ingest_fulfillment.py --workdir ...")
     print("THEN: python scripts/step4_finalize.py --workdir ... --output ...")
     return 0

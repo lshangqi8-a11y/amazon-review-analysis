@@ -18,7 +18,7 @@ from openpyxl.utils import get_column_letter
 from .constants import (
     ANALYSIS_SHEET_NAMES,
     MODULE_DESCRIPTIONS,
-    NEED_FULFILLMENT_SECTION_DESC,
+    OVERVIEW_CHART_TYPES,
     OVERVIEW_MIN_MENTIONS,
     OVERVIEW_SHEET_NAME,
     OVERVIEW_TOP_N,
@@ -353,14 +353,14 @@ def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
     return f"{rate_txt}%（{count}）"
 
 
-# Dashboard layout
-PORTRAIT_TYPES = ["消费人群", "产品用途", "使用场景", "购买动机"]
+# Dashboard layout — V4: all 8 dims use the same column-chart cards (4×2)
+PORTRAIT_TYPES = list(OVERVIEW_CHART_TYPES)  # backward-compatible alias
 _CARD_ROW_HEIGHT = 18
 _CHART_WIDTH = 14.0
 _CHART_HEIGHT = 9.0
 _LEFT_CARD_COLS = (1, 9)  # A:I
 _RIGHT_CARD_COLS = (11, 19)  # K:S
-_HIDDEN_START_COL = 24  # X; each portrait module uses 3 cols: cat/val/label
+_HIDDEN_START_COL = 24  # X; each chart module uses 3 cols: cat/val/label
 _PAGE_FILL = PatternFill("solid", fgColor="F5F5F5")
 _CARD_FILL = PatternFill("solid", fgColor="FFFFFF")
 _CARD_TITLE_FONT = Font(name="Microsoft YaHei", size=12, bold=True, color="1F4E79")
@@ -368,10 +368,6 @@ _EMPTY_FONT = Font(name="Microsoft YaHei", size=11, color="808080", italic=True)
 _DIM_FONT = Font(name="Microsoft YaHei", size=10, bold=True)
 _METRIC_FONT = Font(name="Microsoft YaHei", size=9, color="595959")
 _FEEDBACK_FONT = Font(name="Microsoft YaHei", size=9, color="404040")
-_PANEL_HEADER_FILL_NEG = PatternFill("solid", fgColor="FCE4D6")
-_PANEL_HEADER_FILL_POS = PatternFill("solid", fgColor="E2EFDA")
-_DATABAR_NEG = "ED7D31"
-_DATABAR_POS = "70AD47"
 
 
 def _fill_range(ws, r1: int, c1: int, r2: int, c2: int, fill: PatternFill) -> None:
@@ -826,13 +822,16 @@ def _build_overview_sheet(
     total_reviews: int = 0,
     voc_items: int = 0,
 ) -> dict:
-    """Dashboard: meta + 2x2 charts + dual feedback DataBar panels."""
+    """Dashboard: meta + 4×2 column charts (all 8 dimensions, same style)."""
     if OVERVIEW_SHEET_NAME in wb.sheetnames:
         del wb[OVERVIEW_SHEET_NAME]
     ws = wb.create_sheet(OVERVIEW_SHEET_NAME)
     ws.sheet_view.showGridLines = False
 
-    for r in range(1, 100):
+    chart_types = list(OVERVIEW_CHART_TYPES)
+    n_rows = (len(chart_types) + 1) // 2
+    page_rows = 5 + n_rows * _CARD_ROW_HEIGHT + 5
+    for r in range(1, page_rows):
         for c in range(1, 20):
             ws.cell(row=r, column=c).fill = _PAGE_FILL
 
@@ -842,7 +841,6 @@ def _build_overview_sheet(
     ws.merge_cells("A1:I1")
     ws.row_dimensions[1].height = 28
 
-    # One compact meta line (no conclusion block)
     meta_row = 3
     product_name = str(product_name or "").strip()
     product_category = str(product_category or "").strip()
@@ -880,21 +878,20 @@ def _build_overview_sheet(
     for letter in ("O", "P", "Q", "R", "S"):
         ws.column_dimensions[letter].width = 12
 
-    for col_i in range(_HIDDEN_START_COL, _HIDDEN_START_COL + 12):
+    hidden_cols = max(12, len(chart_types) * 3)
+    for col_i in range(_HIDDEN_START_COL, _HIDDEN_START_COL + hidden_cols):
         letter = get_column_letter(col_i)
         ws.column_dimensions[letter].hidden = True
         ws.column_dimensions[letter].width = 14
 
     upper_start = meta_row + 2
     ws.freeze_panes = f"A{upper_start}"
-
-    # Portrait modules (2×2) — no section banner
     grid_start = upper_start
 
     module_metas: list[dict] = []
     chart_titles: list[str] = []
     label_payloads: list[dict] = []
-    for idx, item_type in enumerate(PORTRAIT_TYPES):
+    for idx, item_type in enumerate(chart_types):
         grid_r = idx // 2
         grid_c = idx % 2
         card_row = grid_start + grid_r * _CARD_ROW_HEIGHT
@@ -902,7 +899,6 @@ def _build_overview_sheet(
         hidden_cat = _HIDDEN_START_COL + idx * 3
         hidden_val = hidden_cat + 1
         hidden_label = hidden_cat + 2
-        # Each portrait module uses its own hidden column triple; all start at row 1
         hidden_header_row = 1
         meta = _write_portrait_module(
             ws,
@@ -923,65 +919,15 @@ def _build_overview_sheet(
         if meta.get("label_payload"):
             label_payloads.append(meta["label_payload"])
 
-    feedback_label_row = grid_start + 2 * _CARD_ROW_HEIGHT + 1
-    sec = ws.cell(
-        row=feedback_label_row,
-        column=1,
-        value="需求满足分析（用户满意 / 未被满足）",
-    )
-    sec.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
-    ws.merge_cells(
-        start_row=feedback_label_row,
-        start_column=1,
-        end_row=feedback_label_row,
-        end_column=19,
-    )
-    sec_desc = ws.cell(
-        row=feedback_label_row + 1,
-        column=1,
-        value=NEED_FULFILLMENT_SECTION_DESC,
-    )
-    sec_desc.font = Font(name="Microsoft YaHei", size=8, color="666666")
-    sec_desc.alignment = Alignment(wrap_text=True)
-    ws.merge_cells(
-        start_row=feedback_label_row + 1,
-        start_column=1,
-        end_row=feedback_label_row + 1,
-        end_column=19,
-    )
-    ws.row_dimensions[feedback_label_row + 1].height = 24
-    panel_start = feedback_label_row + 2
-
-    left_rows = _write_feedback_panel(
-        ws,
-        start_row=panel_start,
-        col_start=_LEFT_CARD_COLS[0],
-        item_type="用户不满",
-        summary_rows=summary_rows or [],
-        header_fill=_PANEL_HEADER_FILL_NEG,
-        databar_color=_DATABAR_NEG,
-        total_reviews=total_reviews,
-    )
-    right_rows = _write_feedback_panel(
-        ws,
-        start_row=panel_start,
-        col_start=_RIGHT_CARD_COLS[0],
-        item_type="用户满意",
-        summary_rows=summary_rows or [],
-        header_fill=_PANEL_HEADER_FILL_POS,
-        databar_color=_DATABAR_POS,
-        total_reviews=total_reviews,
-    )
-
     return {
         "chart_titles": chart_titles,
         "chart_count": len(chart_titles),
         "module_metas": module_metas,
         "label_payloads": label_payloads,
-        "feedback_left_rows": left_rows,
-        "feedback_right_rows": right_rows,
+        "feedback_left_rows": 0,
+        "feedback_right_rows": 0,
         "upper_start": upper_start,
-        "feedback_start": panel_start,
+        "feedback_start": None,
     }
 
 

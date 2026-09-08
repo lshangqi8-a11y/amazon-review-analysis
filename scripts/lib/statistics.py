@@ -97,21 +97,22 @@ def build_overview_conclusion(
             f"{r.get('dimension')}（{float(r.get('mention_rate') or 0):.1f}%）" for r in rows
         )
 
-    lines.append("【消费者画像】由评论勾勒：谁在用、用来干什么、在哪用、为何买")
+    lines.append("【消费者画像】谁、在哪、何时、做什么、什么场合、为何买")
     lines.append(f"• 消费人群：{fmt(tops('消费人群'))}")
+    lines.append(f"• 使用地点：{fmt(tops('使用地点'))}")
+    lines.append(f"• 使用时刻：{fmt(tops('使用时刻'))}")
     lines.append(f"• 产品用途：{fmt(tops('产品用途'))}")
     lines.append(f"• 使用场景：{fmt(tops('使用场景'))}")
     lines.append(f"• 购买动机：{fmt(tops('购买动机'))}")
-    lines.append("【需求满足】满意点与未被满足点（勿与画像维度混拆）")
+    lines.append("【需求满足】满意点与未被满足点")
     lines.append(f"• 主要满意：{fmt(tops('用户满意', 5))}")
-    lines.append(f"• 主要未被满足：{fmt(tops('用户不满', 5))}")
+    lines.append(f"• 主要未被满足：{fmt(tops('未被满足', 5))}")
     return "\n".join(lines)
 
 
 def aggregate_statistics(items: list[dict], total_reviews: int) -> list[dict]:
     """
-    Output order:
-    消费人群 → 产品用途 → 使用场景 → 购买动机 → 用户满意 → 用户不满
+    Output order follows VOC_TYPES (8 dims).
     within each type: mention_count desc, then dimension name.
     """
     pairs = defaultdict(set)
