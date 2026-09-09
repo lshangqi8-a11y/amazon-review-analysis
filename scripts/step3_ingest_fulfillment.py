@@ -57,7 +57,7 @@ def main() -> int:
     write_json(workdir / "fulfillment_items.json", kept)
     write_json(workdir / "fulfillment_dropped.json", dropped)
     print(f"fulfillment_items={len(kept)} dropped={len(dropped)}")
-    print("NEXT: python scripts/step4_finalize.py --workdir ... --output ...")
+    print("NEXT: python scripts/step4_prepare_summary.py --workdir ...")
     return 0
 
 

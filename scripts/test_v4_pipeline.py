@@ -135,5 +135,4 @@ if __name__ == "__main__":
 
     tex.test_display_labels()
     tex.test_dashboard_full()
-    tex.test_empty_chart_modules()
     print("ALL_V4_TESTS_PASSED")

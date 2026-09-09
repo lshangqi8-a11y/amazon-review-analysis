@@ -355,14 +355,19 @@ def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
     return f"{rate_txt}%（{count}）"
 
 
-# Dashboard layout — charts 2×2; place/time + fulfillment as list panels
+# Dashboard: left charts/panels (A–M), right AI summary column (O–S)
 PORTRAIT_TYPES = list(OVERVIEW_CHART_TYPES)
 _CARD_ROW_HEIGHT = 18
-_CHART_WIDTH = 14.0
-_CHART_HEIGHT = 9.5
-_LEFT_CARD_COLS = (1, 9)  # A:I
-_RIGHT_CARD_COLS = (11, 19)  # K:S
-_HIDDEN_START_COL = 24  # X; each chart module uses 3 cols: cat/val/label
+_CHART_WIDTH = 10.5
+_CHART_HEIGHT = 9.0
+_CHART_LEFT_COLS = (1, 6)  # A:F
+_CHART_RIGHT_COLS = (8, 13)  # H:M
+_PANEL_LEFT_COLS = (1, 6)
+_PANEL_RIGHT_COLS = (8, 13)
+_LEFT_ZONE_END = 13  # M
+_SUMMARY_COL_START = 15  # O
+_SUMMARY_COL_END = 19  # S
+_HIDDEN_START_COL = 24
 _PAGE_FILL = PatternFill("solid", fgColor="F5F5F5")
 _CARD_FILL = PatternFill("solid", fgColor="FFFFFF")
 _CARD_TITLE_FONT = Font(name="Microsoft YaHei", size=12, bold=True, color="1F4E79")
@@ -376,7 +381,8 @@ _PANEL_HEADER_FILL_CTX = PatternFill("solid", fgColor="D6EAF8")
 _DATABAR_NEG = "ED7D31"
 _DATABAR_POS = "70AD47"
 _DATABAR_CTX = "5B9BD5"
-_SUMMARY_RESERVE_FILL = PatternFill("solid", fgColor="FAFBFC")
+_SUMMARY_FILL = PatternFill("solid", fgColor="FFFFFF")
+_SUMMARY_HEADER_FILL = PatternFill("solid", fgColor="D6EAF8")
 
 
 def _fill_range(ws, r1: int, c1: int, r2: int, c2: int, fill: PatternFill) -> None:
@@ -701,6 +707,7 @@ def _write_feedback_panel(
     *,
     start_row: int,
     col_start: int,
+    col_end: int,
     item_type: str,
     summary_rows: list[dict],
     header_fill: PatternFill,
@@ -711,10 +718,10 @@ def _write_feedback_panel(
     display = type_display_label(item_type)
     top_n = _overview_limit_for_type(item_type)
     dim_c = col_start
-    bar_c = col_start + 2
-    metric_c = col_start + 3
-    fb_c = col_start + 4
-    fb_end = col_start + 8
+    bar_c = min(col_start + 2, col_end)
+    metric_c = min(col_start + 3, col_end)
+    fb_c = min(col_start + 4, col_end)
+    fb_end = col_end
 
     header = ws.cell(row=start_row, column=dim_c, value=display)
     header.font = _CARD_TITLE_FONT
@@ -758,12 +765,14 @@ def _write_feedback_panel(
     bar_start_row = data_row
     for i, item in enumerate(top_rows):
         r = data_row + i
-        ws.row_dimensions[r].height = 48
+        ws.row_dimensions[r].height = 44
         dim = str(item.get("dimension") or "")
         dim_cell = ws.cell(row=r, column=dim_c, value=dim)
         dim_cell.font = _DIM_FONT
         dim_cell.alignment = Alignment(wrap_text=True, vertical="center")
-        ws.merge_cells(start_row=r, start_column=dim_c, end_row=r, end_column=dim_c + 1)
+        merge_dim_end = min(dim_c + 1, bar_c - 1) if bar_c > dim_c + 1 else dim_c
+        if merge_dim_end > dim_c:
+            ws.merge_cells(start_row=r, start_column=dim_c, end_row=r, end_column=merge_dim_end)
 
         rate = float(item.get("mention_rate") or 0) / 100.0
         bar_cell = ws.cell(row=r, column=bar_c, value=rate)
@@ -778,7 +787,8 @@ def _write_feedback_panel(
         fb_cell = ws.cell(row=r, column=fb_c, value=fb)
         fb_cell.font = _FEEDBACK_FONT
         fb_cell.alignment = Alignment(wrap_text=True, vertical="center")
-        ws.merge_cells(start_row=r, start_column=fb_c, end_row=r, end_column=fb_end)
+        if fb_end > fb_c:
+            ws.merge_cells(start_row=r, start_column=fb_c, end_row=r, end_column=fb_end)
 
         for c in range(dim_c, fb_end + 1):
             ws.cell(row=r, column=c).border = Border(bottom=Side(style="hair", color="E0E0E0"))
@@ -789,37 +799,78 @@ def _write_feedback_panel(
     return (data_row - start_row) + len(top_rows)
 
 
-def _write_section_banner(ws, *, row: int, title: str, desc: str = "") -> int:
+def _write_section_banner(ws, *, row: int, title: str, desc: str = "", end_col: int = _LEFT_ZONE_END) -> int:
     """Return next content row after banner (+ optional desc)."""
     cell = ws.cell(row=row, column=1, value=title)
     cell.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=19)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=end_col)
     if not desc:
         return row + 1
     d = ws.cell(row=row + 1, column=1, value=desc)
     d.font = Font(name="Microsoft YaHei", size=8, color="666666")
     d.alignment = Alignment(wrap_text=True)
-    ws.merge_cells(start_row=row + 1, start_column=1, end_row=row + 1, end_column=19)
+    ws.merge_cells(start_row=row + 1, start_column=1, end_row=row + 1, end_column=end_col)
     ws.row_dimensions[row + 1].height = 20
     return row + 2
+
+
+def _write_ai_summary_column(
+    ws,
+    *,
+    start_row: int,
+    end_row: int,
+    summary_text: str,
+) -> None:
+    c1, c2 = _SUMMARY_COL_START, _SUMMARY_COL_END
+    thin = Side(style="thin", color="BFBFBF")
+    title = ws.cell(row=start_row, column=c1, value="AI总结")
+    title.font = _CARD_TITLE_FONT
+    title.fill = _SUMMARY_HEADER_FILL
+    title.alignment = Alignment(vertical="center")
+    for c in range(c1, c2 + 1):
+        cell = ws.cell(row=start_row, column=c)
+        cell.fill = _SUMMARY_HEADER_FILL
+        cell.border = Border(
+            left=thin if c == c1 else None,
+            right=thin if c == c2 else None,
+            top=thin,
+            bottom=thin,
+        )
+    ws.merge_cells(start_row=start_row, start_column=c1, end_row=start_row, end_column=c2)
+    ws.row_dimensions[start_row].height = 24
+
+    body_start = start_row + 1
+    body_end = max(body_start, end_row)
+    text = (summary_text or "").strip() or "（尚未生成 AI 总结）"
+    body = ws.cell(row=body_start, column=c1, value=text)
+    body.font = Font(name="Microsoft YaHei", size=9, color="303030")
+    body.alignment = Alignment(wrap_text=True, vertical="top")
+    body.fill = _SUMMARY_FILL
+    for r in range(body_start, body_end + 1):
+        for c in range(c1, c2 + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.fill = _SUMMARY_FILL
+            cell.border = Border(
+                left=thin if c == c1 else None,
+                right=thin if c == c2 else None,
+                top=thin if r == body_start else None,
+                bottom=thin if r == body_end else None,
+            )
+    ws.merge_cells(start_row=body_start, start_column=c1, end_row=body_end, end_column=c2)
 
 
 def _build_overview_sheet(
     wb,
     *,
     summary_rows: list[dict],
+    total_reviews: int = 0,
+    overview_summary: str = "",
+    voc_items: int = 0,
     product_name: str = "",
     product_category: str = "",
-    total_reviews: int = 0,
-    voc_items: int = 0,
 ) -> dict:
-    """
-    Dashboard:
-    - Header: title A–D, 评论总数 E–I, summary reserve J–S (empty for later AI)
-    - 2×2 column charts: 人群 / 用途 / 场景 / 动机
-    - Dual list panels: 地点 | 时刻, then 未被满足 | 用户满意
-    """
-    del voc_items  # kept in API for callers; not shown on product dashboard
+    """Left A–M charts/panels; right O–S one-shot AI summary. No product fields on dashboard."""
+    del voc_items, product_name, product_category
     if OVERVIEW_SHEET_NAME in wb.sheetnames:
         del wb[OVERVIEW_SHEET_NAME]
     ws = wb.create_sheet(OVERVIEW_SHEET_NAME)
@@ -827,12 +878,11 @@ def _build_overview_sheet(
 
     chart_types = list(OVERVIEW_CHART_TYPES)
     n_chart_rows = (len(chart_types) + 1) // 2
-    page_rows = 10 + n_chart_rows * _CARD_ROW_HEIGHT + 100
+    page_rows = 10 + n_chart_rows * _CARD_ROW_HEIGHT + 120
     for r in range(1, page_rows):
         for c in range(1, 20):
             ws.cell(row=r, column=c).fill = _PAGE_FILL
 
-    # --- Header row: title | review count | summary reserve ---
     ws["A1"] = "Amazon 评论分析总览"
     ws["A1"].font = _TITLE_FONT
     ws["A1"].fill = _PAGE_FILL
@@ -842,47 +892,20 @@ def _build_overview_sheet(
     count_cell = ws.cell(row=1, column=5, value=f"评论总数：{int(total_reviews or 0)}")
     count_cell.font = Font(name="Microsoft YaHei", size=10, color="404040")
     count_cell.alignment = Alignment(vertical="center")
-    ws.merge_cells("E1:I1")
+    ws.merge_cells("E1:M1")
 
-    # Reserved for future AI summary (do not populate)
-    for c in range(11, 20):
-        cell = ws.cell(row=1, column=c, value="" if c == 11 else None)
-        cell.fill = _SUMMARY_RESERVE_FILL
-    ws.merge_cells("K1:S1")
-    thin = Side(style="hair", color="D0D0D0")
-    ws["K1"].border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    product_name = str(product_name or "").strip()
-    product_category = str(product_category or "").strip()
-    content_start = 3
-    if product_name or product_category:
-        bits = []
-        if product_name:
-            bits.append(f"产品名称：{product_name}")
-        if product_category:
-            bits.append(f"产品类目：{product_category}")
-        p = ws.cell(row=2, column=1, value="　　".join(bits))
-        p.font = Font(name="Microsoft YaHei", size=9, color="595959")
-        ws.merge_cells("A2:I2")
-        content_start = 3
-    else:
-        content_start = 3
-
-    ws.column_dimensions["A"].width = 14
-    ws.column_dimensions["B"].width = 12
-    ws.column_dimensions["C"].width = 14
-    ws.column_dimensions["D"].width = 12
-    ws.column_dimensions["E"].width = 14
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 10
+    ws.column_dimensions["C"].width = 10
+    ws.column_dimensions["D"].width = 10
+    ws.column_dimensions["E"].width = 11
     ws.column_dimensions["F"].width = 10
-    for letter in ("G", "H", "I"):
-        ws.column_dimensions[letter].width = 12
-    ws.column_dimensions["J"].width = 2
-    ws.column_dimensions["K"].width = 16
-    ws.column_dimensions["L"].width = 12
-    ws.column_dimensions["M"].width = 14
-    ws.column_dimensions["N"].width = 14
+    ws.column_dimensions["G"].width = 2
+    for letter in ("H", "I", "J", "K", "L", "M"):
+        ws.column_dimensions[letter].width = 11
+    ws.column_dimensions["N"].width = 2
     for letter in ("O", "P", "Q", "R", "S"):
-        ws.column_dimensions[letter].width = 12
+        ws.column_dimensions[letter].width = 14
 
     hidden_cols = max(12, len(chart_types) * 3)
     for col_i in range(_HIDDEN_START_COL, _HIDDEN_START_COL + hidden_cols):
@@ -890,6 +913,7 @@ def _build_overview_sheet(
         ws.column_dimensions[letter].hidden = True
         ws.column_dimensions[letter].width = 14
 
+    content_start = 3
     ws.freeze_panes = f"A{content_start}"
     grid_start = content_start
 
@@ -900,7 +924,7 @@ def _build_overview_sheet(
         grid_r = idx // 2
         grid_c = idx % 2
         card_row = grid_start + grid_r * _CARD_ROW_HEIGHT
-        c1, c2 = _LEFT_CARD_COLS if grid_c == 0 else _RIGHT_CARD_COLS
+        c1, c2 = _CHART_LEFT_COLS if grid_c == 0 else _CHART_RIGHT_COLS
         hidden_cat = _HIDDEN_START_COL + idx * 3
         hidden_val = hidden_cat + 1
         hidden_label = hidden_cat + 2
@@ -924,8 +948,6 @@ def _build_overview_sheet(
             label_payloads.append(meta["label_payload"])
 
     cursor = grid_start + n_chart_rows * _CARD_ROW_HEIGHT + 1
-
-    # Place / time auditable lists
     cursor = _write_section_banner(
         ws, row=cursor, title="使用地点 / 使用时刻", desc=CONTEXT_SECTION_DESC
     )
@@ -933,7 +955,8 @@ def _build_overview_sheet(
     left_ctx = _write_feedback_panel(
         ws,
         start_row=ctx_start,
-        col_start=_LEFT_CARD_COLS[0],
+        col_start=_PANEL_LEFT_COLS[0],
+        col_end=_PANEL_LEFT_COLS[1],
         item_type="使用地点",
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_CTX,
@@ -944,7 +967,8 @@ def _build_overview_sheet(
     right_ctx = _write_feedback_panel(
         ws,
         start_row=ctx_start,
-        col_start=_RIGHT_CARD_COLS[0],
+        col_start=_PANEL_RIGHT_COLS[0],
+        col_end=_PANEL_RIGHT_COLS[1],
         item_type="使用时刻",
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_CTX,
@@ -953,8 +977,6 @@ def _build_overview_sheet(
         show_desc=True,
     )
     cursor = ctx_start + max(left_ctx, right_ctx) + 1
-
-    # Satisfaction / unmet
     cursor = _write_section_banner(
         ws,
         row=cursor,
@@ -965,7 +987,8 @@ def _build_overview_sheet(
     left_rows = _write_feedback_panel(
         ws,
         start_row=panel_start,
-        col_start=_LEFT_CARD_COLS[0],
+        col_start=_PANEL_LEFT_COLS[0],
+        col_end=_PANEL_LEFT_COLS[1],
         item_type="未被满足",
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_NEG,
@@ -976,7 +999,8 @@ def _build_overview_sheet(
     right_rows = _write_feedback_panel(
         ws,
         start_row=panel_start,
-        col_start=_RIGHT_CARD_COLS[0],
+        col_start=_PANEL_RIGHT_COLS[0],
+        col_end=_PANEL_RIGHT_COLS[1],
         item_type="用户满意",
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_POS,
@@ -984,7 +1008,13 @@ def _build_overview_sheet(
         total_reviews=total_reviews,
         show_desc=True,
     )
-
+    left_end = panel_start + max(left_rows, right_rows)
+    _write_ai_summary_column(
+        ws,
+        start_row=1,
+        end_row=max(left_end, grid_start + n_chart_rows * _CARD_ROW_HEIGHT),
+        summary_text=overview_summary or "",
+    )
     return {
         "chart_titles": chart_titles,
         "chart_count": len(chart_titles),
@@ -997,7 +1027,8 @@ def _build_overview_sheet(
         "upper_start": grid_start,
         "feedback_start": panel_start,
         "context_start": ctx_start,
-        "summary_reserve": "K1:S1",
+        "summary_reserve": f"O1:S{max(left_end, 2)}",
+        "has_overview_summary": bool((overview_summary or "").strip()),
     }
 
 
@@ -1052,6 +1083,7 @@ def write_analysis_workbook(
     product_category: str = "",
     total_reviews: int = 0,
     voc_items: int | None = None,
+    overview_summary: str = "",
 ) -> dict:
     """Keep original sheets; append dashboard overview + result at end."""
     source_path = Path(source_path)
@@ -1074,10 +1106,11 @@ def write_analysis_workbook(
     overview_meta = _build_overview_sheet(
         wb,
         summary_rows=summary_rows,
-        product_name=product_name,
-        product_category=product_category,
         total_reviews=total_reviews,
+        overview_summary=overview_summary or "",
         voc_items=int(voc_items or 0),
+        product_name=product_name or "",
+        product_category=product_category or "",
     )
     _build_result_sheet(wb, summary_rows)
     _ensure_analysis_sheets_at_end(wb, original_sheet_order)
@@ -1099,4 +1132,5 @@ def write_analysis_workbook(
         "feedback_start": overview_meta.get("feedback_start"),
         "context_start": overview_meta.get("context_start"),
         "summary_reserve": overview_meta.get("summary_reserve"),
+        "has_overview_summary": overview_meta.get("has_overview_summary"),
     }
