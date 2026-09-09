@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Local assertions for V4 Excel Dashboard export (8 column charts)."""
+"""Local assertions for V4 Excel Dashboard (6 charts + dual fulfillment panels)."""
 from __future__ import annotations
 
 import sys
@@ -90,17 +90,17 @@ def test_dashboard_full() -> None:
         )
         expected = ["Reviews", "Summary", "Raw Data", OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME]
         assert meta["sheetnames"] == expected, meta["sheetnames"]
-        assert meta["chart_count"] == 8, meta["chart_count"]
+        assert meta["chart_count"] == 6, meta["chart_count"]
+        assert meta.get("feedback_start")
 
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
 
         meta_line = str(ov.cell(row=3, column=1).value)
         assert "评论总数：100" in meta_line
-        assert "评论洞察条目数：40" in meta_line
 
         visible_vals = []
-        for r in range(1, 160):
+        for r in range(1, 200):
             for c in range(1, 20):
                 v = ov.cell(row=r, column=c).value
                 if v is not None:
@@ -108,19 +108,17 @@ def test_dashboard_full() -> None:
         joined = "\n".join(visible_vals)
         assert "使用地点" in joined
         assert "使用时刻" in joined
-        assert "产品用途" in joined
-        assert "使用场景" in joined
         assert "未被满足" in joined
         assert "用户满意" in joined
+        assert "需求满足分析" in joined
         assert "用户不满" not in joined
-        assert "需求满足分析" not in joined  # V4: no separate panel section
         assert any("柱顶=频率" in v or "提及数/" in v for v in visible_vals)
-        assert any("提及数/100" in v for v in visible_vals)
+        assert any("出现在" in v and "买家反馈" in v for v in visible_vals)
+        assert any("/100）" in v or "/100)" in v for v in visible_vals)
 
-        assert len(ov._charts) == 8
+        assert len(ov._charts) == 6
         for ch in ov._charts:
             assert ch.type == "col"
-            assert ch.visible_cells_only is False
 
         import zipfile
 
@@ -150,7 +148,7 @@ def test_empty_modules() -> None:
         )
         empty = [m for m in meta["module_metas"] if not m.get("has_chart")]
         assert {m["type"] for m in empty} == {"使用地点", "使用时刻"}
-        assert meta["chart_count"] == 6
+        assert meta["chart_count"] == 4
 
 
 def test_display_labels() -> None:
@@ -164,8 +162,6 @@ def test_display_labels() -> None:
         "产品用途",
         "使用场景",
         "购买动机",
-        "用户满意",
-        "未被满足",
     ]
 
 

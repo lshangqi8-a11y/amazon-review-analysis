@@ -18,6 +18,7 @@ from openpyxl.utils import get_column_letter
 from .constants import (
     ANALYSIS_SHEET_NAMES,
     MODULE_DESCRIPTIONS,
+    NEED_FULFILLMENT_SECTION_DESC,
     OVERVIEW_CHART_TYPES,
     OVERVIEW_MIN_MENTIONS,
     OVERVIEW_SHEET_NAME,
@@ -353,8 +354,8 @@ def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
     return f"{rate_txt}%（{count}）"
 
 
-# Dashboard layout — V4: all 8 dims use the same column-chart cards (4×2)
-PORTRAIT_TYPES = list(OVERVIEW_CHART_TYPES)  # backward-compatible alias
+# Dashboard layout — V4: 3×2 persona column charts + dual fulfillment panels
+PORTRAIT_TYPES = list(OVERVIEW_CHART_TYPES)
 _CARD_ROW_HEIGHT = 18
 _CHART_WIDTH = 14.0
 _CHART_HEIGHT = 9.0
@@ -368,6 +369,10 @@ _EMPTY_FONT = Font(name="Microsoft YaHei", size=11, color="808080", italic=True)
 _DIM_FONT = Font(name="Microsoft YaHei", size=10, bold=True)
 _METRIC_FONT = Font(name="Microsoft YaHei", size=9, color="595959")
 _FEEDBACK_FONT = Font(name="Microsoft YaHei", size=9, color="404040")
+_PANEL_HEADER_FILL_NEG = PatternFill("solid", fgColor="FCE4D6")
+_PANEL_HEADER_FILL_POS = PatternFill("solid", fgColor="E2EFDA")
+_DATABAR_NEG = "ED7D31"
+_DATABAR_POS = "70AD47"
 
 
 def _fill_range(ws, r1: int, c1: int, r2: int, c2: int, fill: PatternFill) -> None:
@@ -822,15 +827,16 @@ def _build_overview_sheet(
     total_reviews: int = 0,
     voc_items: int = 0,
 ) -> dict:
-    """Dashboard: meta + 4×2 column charts (all 8 dimensions, same style)."""
+    """Dashboard: meta + 3×2 persona charts + dual fulfillment list panels."""
     if OVERVIEW_SHEET_NAME in wb.sheetnames:
         del wb[OVERVIEW_SHEET_NAME]
     ws = wb.create_sheet(OVERVIEW_SHEET_NAME)
     ws.sheet_view.showGridLines = False
 
     chart_types = list(OVERVIEW_CHART_TYPES)
-    n_rows = (len(chart_types) + 1) // 2
-    page_rows = 5 + n_rows * _CARD_ROW_HEIGHT + 5
+    n_chart_rows = (len(chart_types) + 1) // 2
+    # Extra room for section header + fulfillment panels (up to ~40 rows each side)
+    page_rows = 8 + n_chart_rows * _CARD_ROW_HEIGHT + 80
     for r in range(1, page_rows):
         for c in range(1, 20):
             ws.cell(row=r, column=c).fill = _PAGE_FILL
@@ -919,15 +925,66 @@ def _build_overview_sheet(
         if meta.get("label_payload"):
             label_payloads.append(meta["label_payload"])
 
+    feedback_label_row = grid_start + n_chart_rows * _CARD_ROW_HEIGHT + 1
+    sec = ws.cell(
+        row=feedback_label_row,
+        column=1,
+        value="需求满足分析（未被满足 / 用户满意）",
+    )
+    sec.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
+    ws.merge_cells(
+        start_row=feedback_label_row,
+        start_column=1,
+        end_row=feedback_label_row,
+        end_column=19,
+    )
+    sec_desc = ws.cell(
+        row=feedback_label_row + 1,
+        column=1,
+        value=NEED_FULFILLMENT_SECTION_DESC,
+    )
+    sec_desc.font = Font(name="Microsoft YaHei", size=8, color="666666")
+    sec_desc.alignment = Alignment(wrap_text=True)
+    ws.merge_cells(
+        start_row=feedback_label_row + 1,
+        start_column=1,
+        end_row=feedback_label_row + 1,
+        end_column=19,
+    )
+    ws.row_dimensions[feedback_label_row + 1].height = 24
+    panel_start = feedback_label_row + 2
+
+    # Left unmet (orange) / right satisfied (green) — matches auditable list layout
+    left_rows = _write_feedback_panel(
+        ws,
+        start_row=panel_start,
+        col_start=_LEFT_CARD_COLS[0],
+        item_type="未被满足",
+        summary_rows=summary_rows or [],
+        header_fill=_PANEL_HEADER_FILL_NEG,
+        databar_color=_DATABAR_NEG,
+        total_reviews=total_reviews,
+    )
+    right_rows = _write_feedback_panel(
+        ws,
+        start_row=panel_start,
+        col_start=_RIGHT_CARD_COLS[0],
+        item_type="用户满意",
+        summary_rows=summary_rows or [],
+        header_fill=_PANEL_HEADER_FILL_POS,
+        databar_color=_DATABAR_POS,
+        total_reviews=total_reviews,
+    )
+
     return {
         "chart_titles": chart_titles,
         "chart_count": len(chart_titles),
         "module_metas": module_metas,
         "label_payloads": label_payloads,
-        "feedback_left_rows": 0,
-        "feedback_right_rows": 0,
+        "feedback_left_rows": left_rows,
+        "feedback_right_rows": right_rows,
         "upper_start": upper_start,
-        "feedback_start": None,
+        "feedback_start": panel_start,
     }
 
 

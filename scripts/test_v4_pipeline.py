@@ -22,8 +22,10 @@ def test_type_sets() -> None:
         "购买动机",
     }
     assert FULFILLMENT_ALLOWED == {"用户满意", "未被满足"}
-    assert list(VOC_TYPES) == list(OVERVIEW_CHART_TYPES)
+    assert set(OVERVIEW_CHART_TYPES) == PERSONA_ALLOWED
+    assert set(VOC_TYPES) == PERSONA_ALLOWED | FULFILLMENT_ALLOWED
     assert len(VOC_TYPES) == 8
+    assert len(OVERVIEW_CHART_TYPES) == 6
 
 
 def test_persona_gatekeep() -> None:

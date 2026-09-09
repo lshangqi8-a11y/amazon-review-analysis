@@ -23,8 +23,9 @@ ALLOWED_TYPES = set(VOC_TYPES)
 PERSONA_ALLOWED = set(PERSONA_TYPES)
 FULFILLMENT_ALLOWED = set(FULFILLMENT_TYPES)
 
-# Overview: all eight use the same column-chart card style
-OVERVIEW_CHART_TYPES = list(VOC_TYPES)
+# Overview: persona dims use column charts; fulfillment uses auditable list panels
+OVERVIEW_CHART_TYPES = list(PERSONA_TYPES)
+OVERVIEW_PANEL_TYPES = list(FULFILLMENT_TYPES)
 
 EXTRACT_CHUNK_LIMIT = 50
 REPRESENTATIVE_FEEDBACK_LIMIT = 5
