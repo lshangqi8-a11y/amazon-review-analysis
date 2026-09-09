@@ -23,8 +23,17 @@ ALLOWED_TYPES = set(VOC_TYPES)
 PERSONA_ALLOWED = set(PERSONA_TYPES)
 FULFILLMENT_ALLOWED = set(FULFILLMENT_TYPES)
 
-# Overview: persona dims use column charts; fulfillment uses auditable list panels
-OVERVIEW_CHART_TYPES = list(PERSONA_TYPES)
+# Overview: column charts (auditable list for place/time instead of crowded bars)
+OVERVIEW_CHART_TYPES = [
+    "消费人群",
+    "产品用途",
+    "使用场景",
+    "购买动机",
+]
+OVERVIEW_CONTEXT_PANEL_TYPES = [
+    "使用地点",
+    "使用时刻",
+]
 OVERVIEW_PANEL_TYPES = list(FULFILLMENT_TYPES)
 
 EXTRACT_CHUNK_LIMIT = 50
@@ -37,20 +46,20 @@ OVERVIEW_MIN_MENTIONS = 0
 # Identity map kept for API compatibility (V4 types are already display names)
 TYPE_DISPLAY_LABELS: dict[str, str] = {}
 
+# Short blurbs only — no chart-formula jargon on the dashboard
 MODULE_DESCRIPTIONS = {
-    "消费人群": "谁在使用/为谁购买（柱顶=频率与提及数/评论总数；可重叠）。",
-    "使用地点": "在哪里使用（空间场所；柱顶=频率与提及数/评论总数；可重叠）。",
-    "使用时刻": "什么时候使用（时间节律；柱顶=频率与提及数/评论总数；可重叠）。",
-    "产品用途": "产品被拿来做什么任务（柱顶=频率与提及数/评论总数；可重叠）。",
-    "使用场景": "在什么事务/场合情境中使用（柱顶=频率与提及数/评论总数；可重叠）。",
-    "购买动机": "买前为何选择（无买前证据可为空；柱顶=频率与提及数/评论总数）。",
-    "用户满意": "用后正面体验及占比（频率=提及数/评论总数），识别可保留优势。",
-    "未被满足": "用后负面缺口及占比（频率=提及数/评论总数），识别改进方向。",
+    "消费人群": "谁在使用 / 为谁购买",
+    "使用地点": "在哪里使用（空间场所）",
+    "使用时刻": "什么时候使用（时间节律）",
+    "产品用途": "产品被拿来做什么",
+    "使用场景": "在什么事务 / 场合中使用",
+    "购买动机": "买前为何选择（无证据可为空）",
+    "用户满意": "用后正面体验，识别可保留优势",
+    "未被满足": "用后负面缺口，识别改进方向",
 }
 
-NEED_FULFILLMENT_SECTION_DESC = (
-    "汇总正面与负面体验及提及占比，支撑产品优势确认与改进落地。"
-)
+NEED_FULFILLMENT_SECTION_DESC = "正面与负面体验及提及占比，支撑优势确认与改进落地。"
+CONTEXT_SECTION_DESC = "地点与时刻分列展示，便于对照原文审计（完整条目见「评论分析结果」）。"
 
 ANALYSIS_SHEET_NAMES = (
     OVERVIEW_SHEET_NAME,

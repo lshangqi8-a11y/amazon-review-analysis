@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Local assertions for V4 Excel Dashboard (6 charts + dual fulfillment panels)."""
+"""Local assertions for V4 Excel Dashboard (4 charts + context/fulfillment panels)."""
 from __future__ import annotations
 
 import sys
@@ -42,7 +42,7 @@ def _full_summary(*, skip_types: set[str] | None = None) -> list[dict]:
     rows: list[dict] = []
     specs = [
         ("消费人群", ["家庭用户", "新手买家", "老年用户", "学生党"], 4),
-        ("使用地点", ["厨房", "台面", "庭院", "车内"], 4),
+        ("使用地点", ["厨房", "台面", "庭院", "车内", "室内"], 5),
         ("使用时刻", ["每天", "夜间", "早晨", "碎片时间"], 4),
         ("产品用途", ["日常切割", "厨房备菜", "清洗奶瓶", "娱乐互动"], 4),
         ("使用场景", ["日常清洁养护", "礼赠场合", "出行旅行", "夜间照护"], 4),
@@ -90,17 +90,21 @@ def test_dashboard_full() -> None:
         )
         expected = ["Reviews", "Summary", "Raw Data", OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME]
         assert meta["sheetnames"] == expected, meta["sheetnames"]
-        assert meta["chart_count"] == 6, meta["chart_count"]
+        assert meta["chart_count"] == 4, meta["chart_count"]
         assert meta.get("feedback_start")
+        assert meta.get("context_start")
+        assert meta.get("summary_reserve") == "K1:S1"
 
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
 
-        meta_line = str(ov.cell(row=3, column=1).value)
-        assert "评论总数：100" in meta_line
+        assert ov["A1"].value == "Amazon 评论分析总览"
+        assert "评论总数：100" in str(ov.cell(row=1, column=5).value)
+        # Title should not span into E (merged A1:D1)
+        assert "A1:D1" in ov.merged_cells
 
         visible_vals = []
-        for r in range(1, 200):
+        for r in range(1, 220):
             for c in range(1, 20):
                 v = ov.cell(row=r, column=c).value
                 if v is not None:
@@ -108,17 +112,24 @@ def test_dashboard_full() -> None:
         joined = "\n".join(visible_vals)
         assert "使用地点" in joined
         assert "使用时刻" in joined
+        assert "厨房" in joined  # location panel lists all dims
+        assert "室内" in joined
         assert "未被满足" in joined
         assert "用户满意" in joined
         assert "需求满足分析" in joined
+        assert "使用地点 / 使用时刻" in joined
         assert "用户不满" not in joined
-        assert any("柱顶=频率" in v or "提及数/" in v for v in visible_vals)
+        assert "评论洞察条目数" not in joined
+        assert "标准维度数" not in joined
+        assert "共 " not in joined or "共 " not in [v for v in visible_vals if "柱顶" in v]
+        assert not any("柱顶=频率" in v for v in visible_vals)
+        assert not any("（" in str(ch.title) and str(ch.title).endswith("）") for ch in ov._charts)
         assert any("出现在" in v and "买家反馈" in v for v in visible_vals)
-        assert any("/100）" in v or "/100)" in v for v in visible_vals)
 
-        assert len(ov._charts) == 6
+        assert len(ov._charts) == 4
         for ch in ov._charts:
             assert ch.type == "col"
+            assert "（" not in str(ch.title or "")
 
         import zipfile
 
@@ -133,7 +144,7 @@ def test_dashboard_full() -> None:
         wb.close()
 
 
-def test_empty_modules() -> None:
+def test_empty_chart_modules() -> None:
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
         src = td_path / "in.xlsx"
@@ -142,23 +153,20 @@ def test_empty_modules() -> None:
         meta = write_analysis_workbook(
             src,
             out,
-            summary_rows=_full_summary(skip_types={"使用地点", "使用时刻"}),
+            summary_rows=_full_summary(skip_types={"产品用途", "购买动机"}),
             total_reviews=100,
             voc_items=20,
         )
         empty = [m for m in meta["module_metas"] if not m.get("has_chart")]
-        assert {m["type"] for m in empty} == {"使用地点", "使用时刻"}
-        assert meta["chart_count"] == 4
+        assert {m["type"] for m in empty} == {"产品用途", "购买动机"}
+        assert meta["chart_count"] == 2
 
 
 def test_display_labels() -> None:
     assert type_display_label("未被满足") == "未被满足"
-    assert type_display_label("用户满意") == "用户满意"
     assert PORTRAIT_TYPES == list(OVERVIEW_CHART_TYPES)
     assert OVERVIEW_CHART_TYPES == [
         "消费人群",
-        "使用地点",
-        "使用时刻",
         "产品用途",
         "使用场景",
         "购买动机",
@@ -168,5 +176,5 @@ def test_display_labels() -> None:
 if __name__ == "__main__":
     test_display_labels()
     test_dashboard_full()
-    test_empty_modules()
+    test_empty_chart_modules()
     print("ALL_EXCEL_TESTS_PASSED")

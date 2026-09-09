@@ -22,10 +22,10 @@ def test_type_sets() -> None:
         "购买动机",
     }
     assert FULFILLMENT_ALLOWED == {"用户满意", "未被满足"}
-    assert set(OVERVIEW_CHART_TYPES) == PERSONA_ALLOWED
+    assert set(OVERVIEW_CHART_TYPES) == {"消费人群", "产品用途", "使用场景", "购买动机"}
     assert set(VOC_TYPES) == PERSONA_ALLOWED | FULFILLMENT_ALLOWED
     assert len(VOC_TYPES) == 8
-    assert len(OVERVIEW_CHART_TYPES) == 6
+    assert len(OVERVIEW_CHART_TYPES) == 4
 
 
 def test_persona_gatekeep() -> None:
@@ -135,5 +135,5 @@ if __name__ == "__main__":
 
     tex.test_display_labels()
     tex.test_dashboard_full()
-    tex.test_empty_modules()
+    tex.test_empty_chart_modules()
     print("ALL_V4_TESTS_PASSED")

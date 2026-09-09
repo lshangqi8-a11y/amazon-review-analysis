@@ -17,6 +17,7 @@ from openpyxl.utils import get_column_letter
 
 from .constants import (
     ANALYSIS_SHEET_NAMES,
+    CONTEXT_SECTION_DESC,
     MODULE_DESCRIPTIONS,
     NEED_FULFILLMENT_SECTION_DESC,
     OVERVIEW_CHART_TYPES,
@@ -354,11 +355,11 @@ def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
     return f"{rate_txt}%（{count}）"
 
 
-# Dashboard layout — V4: 3×2 persona column charts + dual fulfillment panels
+# Dashboard layout — charts 2×2; place/time + fulfillment as list panels
 PORTRAIT_TYPES = list(OVERVIEW_CHART_TYPES)
 _CARD_ROW_HEIGHT = 18
 _CHART_WIDTH = 14.0
-_CHART_HEIGHT = 9.0
+_CHART_HEIGHT = 9.5
 _LEFT_CARD_COLS = (1, 9)  # A:I
 _RIGHT_CARD_COLS = (11, 19)  # K:S
 _HIDDEN_START_COL = 24  # X; each chart module uses 3 cols: cat/val/label
@@ -371,8 +372,11 @@ _METRIC_FONT = Font(name="Microsoft YaHei", size=9, color="595959")
 _FEEDBACK_FONT = Font(name="Microsoft YaHei", size=9, color="404040")
 _PANEL_HEADER_FILL_NEG = PatternFill("solid", fgColor="FCE4D6")
 _PANEL_HEADER_FILL_POS = PatternFill("solid", fgColor="E2EFDA")
+_PANEL_HEADER_FILL_CTX = PatternFill("solid", fgColor="D6EAF8")
 _DATABAR_NEG = "ED7D31"
 _DATABAR_POS = "70AD47"
+_DATABAR_CTX = "5B9BD5"
+_SUMMARY_RESERVE_FILL = PatternFill("solid", fgColor="FAFBFC")
 
 
 def _fill_range(ws, r1: int, c1: int, r2: int, c2: int, fill: PatternFill) -> None:
@@ -586,6 +590,7 @@ def _write_portrait_module(
     hidden_header_row: int,
     total_reviews: int = 0,
 ) -> dict:
+    """Compact chart card: title only (no count / no jargon subtitle)."""
     top_n = _overview_limit_for_type(item_type)
     display = type_display_label(item_type)
     card_end_row = card_row + _CARD_ROW_HEIGHT - 1
@@ -602,19 +607,6 @@ def _write_portrait_module(
         end_column=min(card_col_start + 7, card_col_end),
     )
 
-    desc = MODULE_DESCRIPTIONS.get(item_type) or ""
-    desc_cell = ws.cell(row=card_row + 1, column=card_col_start, value=desc)
-    desc_cell.font = Font(name="Microsoft YaHei", size=8, color="666666")
-    desc_cell.alignment = Alignment(wrap_text=True, vertical="top")
-    desc_cell.fill = _CARD_FILL
-    ws.merge_cells(
-        start_row=card_row + 1,
-        start_column=card_col_start,
-        end_row=card_row + 1,
-        end_column=card_col_end,
-    )
-    ws.row_dimensions[card_row + 1].height = 28
-
     top_rows = _top_rows_for_type(
         summary_rows or [],
         item_type,
@@ -622,29 +614,6 @@ def _write_portrait_module(
         min_mentions=OVERVIEW_MIN_MENTIONS,
     )
     total = int(total_reviews or 0)
-    if OVERVIEW_MIN_MENTIONS and OVERVIEW_MIN_MENTIONS > 0:
-        sub_text = (
-            f"提及≥{OVERVIEW_MIN_MENTIONS} · 共 {len(top_rows)} 项 · "
-            f"柱顶=频率（提及数/{total or '总数'}，可重叠）"
-        )
-        if top_n is not None:
-            sub_text = (
-                f"Top {top_n} · 提及≥{OVERVIEW_MIN_MENTIONS} · "
-                f"柱顶=频率（提及数/{total or '总数'}，可重叠）"
-            )
-    else:
-        sub_text = f"共 {len(top_rows)} 项 · 柱顶=频率（提及数/{total or '总数'}，可重叠）"
-        if top_n is not None:
-            sub_text = f"Top {top_n} · 柱顶=频率（提及数/{total or '总数'}，可重叠）"
-    sub = ws.cell(row=card_row + 2, column=card_col_start, value=sub_text)
-    sub.font = Font(name="Microsoft YaHei", size=9, color="808080")
-    sub.fill = _CARD_FILL
-    ws.merge_cells(
-        start_row=card_row + 2,
-        start_column=card_col_start,
-        end_row=card_row + 2,
-        end_column=card_col_end,
-    )
 
     if not top_rows:
         msg_row = card_row + (_CARD_ROW_HEIGHT // 2)
@@ -686,11 +655,8 @@ def _write_portrait_module(
 
     data_start = hidden_header_row + 1
     data_end = hidden_header_row + len(top_rows)
-    if top_n is None:
-        chart_title = f"{display}（{len(top_rows)}）"
-    else:
-        chart_title = f"{display} TOP {top_n}"
-    anchor = f"{get_column_letter(card_col_start)}{card_row + 3}"
+    chart_title = display
+    anchor = f"{get_column_letter(card_col_start)}{card_row + 1}"
     y_max = max(float(item.get("mention_rate") or 0) / 100.0 for item in top_rows)
     _add_portrait_column_chart(
         ws,
@@ -740,6 +706,7 @@ def _write_feedback_panel(
     header_fill: PatternFill,
     databar_color: str,
     total_reviews: int = 0,
+    show_desc: bool = True,
 ) -> int:
     display = type_display_label(item_type)
     top_n = _overview_limit_for_type(item_type)
@@ -757,19 +724,23 @@ def _write_feedback_panel(
     ws.merge_cells(start_row=start_row, start_column=dim_c, end_row=start_row, end_column=fb_end)
     ws.row_dimensions[start_row].height = 22
 
-    desc = MODULE_DESCRIPTIONS.get(item_type) or ""
-    desc_cell = ws.cell(row=start_row + 1, column=dim_c, value=desc)
-    desc_cell.font = Font(name="Microsoft YaHei", size=8, color="666666")
-    desc_cell.alignment = Alignment(wrap_text=True, vertical="center")
-    for c in range(dim_c, fb_end + 1):
-        ws.cell(row=start_row + 1, column=c).fill = PatternFill("solid", fgColor="FAFAFA")
-    ws.merge_cells(
-        start_row=start_row + 1,
-        start_column=dim_c,
-        end_row=start_row + 1,
-        end_column=fb_end,
-    )
-    ws.row_dimensions[start_row + 1].height = 26
+    data_row = start_row + 1
+    if show_desc:
+        desc = MODULE_DESCRIPTIONS.get(item_type) or ""
+        if desc:
+            desc_cell = ws.cell(row=start_row + 1, column=dim_c, value=desc)
+            desc_cell.font = Font(name="Microsoft YaHei", size=8, color="666666")
+            desc_cell.alignment = Alignment(wrap_text=True, vertical="center")
+            for c in range(dim_c, fb_end + 1):
+                ws.cell(row=start_row + 1, column=c).fill = PatternFill("solid", fgColor="FAFAFA")
+            ws.merge_cells(
+                start_row=start_row + 1,
+                start_column=dim_c,
+                end_row=start_row + 1,
+                end_column=fb_end,
+            )
+            ws.row_dimensions[start_row + 1].height = 22
+            data_row = start_row + 2
 
     top_rows = _top_rows_for_type(
         summary_rows or [],
@@ -778,15 +749,15 @@ def _write_feedback_panel(
         min_mentions=OVERVIEW_MIN_MENTIONS,
     )
     if not top_rows:
-        r = start_row + 3
+        r = data_row + 1
         cell = ws.cell(row=r, column=dim_c, value="暂无足够评论证据")
         cell.font = _EMPTY_FONT
         ws.merge_cells(start_row=r, start_column=dim_c, end_row=r, end_column=fb_end)
-        return 4
+        return r - start_row + 1
 
-    bar_start_row = start_row + 2
+    bar_start_row = data_row
     for i, item in enumerate(top_rows):
-        r = start_row + 2 + i
+        r = data_row + i
         ws.row_dimensions[r].height = 48
         dim = str(item.get("dimension") or "")
         dim_cell = ws.cell(row=r, column=dim_c, value=dim)
@@ -812,10 +783,25 @@ def _write_feedback_panel(
         for c in range(dim_c, fb_end + 1):
             ws.cell(row=r, column=c).border = Border(bottom=Side(style="hair", color="E0E0E0"))
 
-    bar_end_row = start_row + 1 + len(top_rows)
+    bar_end_row = data_row + len(top_rows) - 1
     col_letter = get_column_letter(bar_c)
     _apply_databar(ws, f"{col_letter}{bar_start_row}:{col_letter}{bar_end_row}", databar_color)
-    return 2 + len(top_rows)
+    return (data_row - start_row) + len(top_rows)
+
+
+def _write_section_banner(ws, *, row: int, title: str, desc: str = "") -> int:
+    """Return next content row after banner (+ optional desc)."""
+    cell = ws.cell(row=row, column=1, value=title)
+    cell.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=19)
+    if not desc:
+        return row + 1
+    d = ws.cell(row=row + 1, column=1, value=desc)
+    d.font = Font(name="Microsoft YaHei", size=8, color="666666")
+    d.alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=row + 1, start_column=1, end_row=row + 1, end_column=19)
+    ws.row_dimensions[row + 1].height = 20
+    return row + 2
 
 
 def _build_overview_sheet(
@@ -827,7 +813,13 @@ def _build_overview_sheet(
     total_reviews: int = 0,
     voc_items: int = 0,
 ) -> dict:
-    """Dashboard: meta + 3×2 persona charts + dual fulfillment list panels."""
+    """
+    Dashboard:
+    - Header: title A–D, 评论总数 E–I, summary reserve J–S (empty for later AI)
+    - 2×2 column charts: 人群 / 用途 / 场景 / 动机
+    - Dual list panels: 地点 | 时刻, then 未被满足 | 用户满意
+    """
+    del voc_items  # kept in API for callers; not shown on product dashboard
     if OVERVIEW_SHEET_NAME in wb.sheetnames:
         del wb[OVERVIEW_SHEET_NAME]
     ws = wb.create_sheet(OVERVIEW_SHEET_NAME)
@@ -835,38 +827,46 @@ def _build_overview_sheet(
 
     chart_types = list(OVERVIEW_CHART_TYPES)
     n_chart_rows = (len(chart_types) + 1) // 2
-    # Extra room for section header + fulfillment panels (up to ~40 rows each side)
-    page_rows = 8 + n_chart_rows * _CARD_ROW_HEIGHT + 80
+    page_rows = 10 + n_chart_rows * _CARD_ROW_HEIGHT + 100
     for r in range(1, page_rows):
         for c in range(1, 20):
             ws.cell(row=r, column=c).fill = _PAGE_FILL
 
+    # --- Header row: title | review count | summary reserve ---
     ws["A1"] = "Amazon 评论分析总览"
     ws["A1"].font = _TITLE_FONT
     ws["A1"].fill = _PAGE_FILL
-    ws.merge_cells("A1:I1")
+    ws.merge_cells("A1:D1")
     ws.row_dimensions[1].height = 28
 
-    meta_row = 3
+    count_cell = ws.cell(row=1, column=5, value=f"评论总数：{int(total_reviews or 0)}")
+    count_cell.font = Font(name="Microsoft YaHei", size=10, color="404040")
+    count_cell.alignment = Alignment(vertical="center")
+    ws.merge_cells("E1:I1")
+
+    # Reserved for future AI summary (do not populate)
+    for c in range(11, 20):
+        cell = ws.cell(row=1, column=c, value="" if c == 11 else None)
+        cell.fill = _SUMMARY_RESERVE_FILL
+    ws.merge_cells("K1:S1")
+    thin = Side(style="hair", color="D0D0D0")
+    ws["K1"].border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
     product_name = str(product_name or "").strip()
     product_category = str(product_category or "").strip()
-    parts: list[str] = []
-    if product_name:
-        parts.append(f"产品名称：{product_name}")
-    if product_category:
-        parts.append(f"产品类目：{product_category}")
-    parts.extend(
-        [
-            f"评论总数：{int(total_reviews or 0)}",
-            f"评论洞察条目数：{int(voc_items or 0)}",
-            f"标准维度数：{len(summary_rows or [])}",
-        ]
-    )
-    meta = ws.cell(row=meta_row, column=1, value="　　".join(parts))
-    meta.font = Font(name="Microsoft YaHei", size=10, color="404040")
-    meta.alignment = Alignment(vertical="center", wrap_text=False)
-    ws.merge_cells(start_row=meta_row, start_column=1, end_row=meta_row, end_column=19)
-    ws.row_dimensions[meta_row].height = 22
+    content_start = 3
+    if product_name or product_category:
+        bits = []
+        if product_name:
+            bits.append(f"产品名称：{product_name}")
+        if product_category:
+            bits.append(f"产品类目：{product_category}")
+        p = ws.cell(row=2, column=1, value="　　".join(bits))
+        p.font = Font(name="Microsoft YaHei", size=9, color="595959")
+        ws.merge_cells("A2:I2")
+        content_start = 3
+    else:
+        content_start = 3
 
     ws.column_dimensions["A"].width = 14
     ws.column_dimensions["B"].width = 12
@@ -890,9 +890,8 @@ def _build_overview_sheet(
         ws.column_dimensions[letter].hidden = True
         ws.column_dimensions[letter].width = 14
 
-    upper_start = meta_row + 2
-    ws.freeze_panes = f"A{upper_start}"
-    grid_start = upper_start
+    ws.freeze_panes = f"A{content_start}"
+    grid_start = content_start
 
     module_metas: list[dict] = []
     chart_titles: list[str] = []
@@ -905,7 +904,6 @@ def _build_overview_sheet(
         hidden_cat = _HIDDEN_START_COL + idx * 3
         hidden_val = hidden_cat + 1
         hidden_label = hidden_cat + 2
-        hidden_header_row = 1
         meta = _write_portrait_module(
             ws,
             card_row=card_row,
@@ -916,7 +914,7 @@ def _build_overview_sheet(
             hidden_cat_col=hidden_cat,
             hidden_val_col=hidden_val,
             hidden_label_col=hidden_label,
-            hidden_header_row=hidden_header_row,
+            hidden_header_row=1,
             total_reviews=total_reviews,
         )
         module_metas.append(meta)
@@ -925,36 +923,45 @@ def _build_overview_sheet(
         if meta.get("label_payload"):
             label_payloads.append(meta["label_payload"])
 
-    feedback_label_row = grid_start + n_chart_rows * _CARD_ROW_HEIGHT + 1
-    sec = ws.cell(
-        row=feedback_label_row,
-        column=1,
-        value="需求满足分析（未被满足 / 用户满意）",
-    )
-    sec.font = Font(name="Microsoft YaHei", size=11, bold=True, color="1F4E79")
-    ws.merge_cells(
-        start_row=feedback_label_row,
-        start_column=1,
-        end_row=feedback_label_row,
-        end_column=19,
-    )
-    sec_desc = ws.cell(
-        row=feedback_label_row + 1,
-        column=1,
-        value=NEED_FULFILLMENT_SECTION_DESC,
-    )
-    sec_desc.font = Font(name="Microsoft YaHei", size=8, color="666666")
-    sec_desc.alignment = Alignment(wrap_text=True)
-    ws.merge_cells(
-        start_row=feedback_label_row + 1,
-        start_column=1,
-        end_row=feedback_label_row + 1,
-        end_column=19,
-    )
-    ws.row_dimensions[feedback_label_row + 1].height = 24
-    panel_start = feedback_label_row + 2
+    cursor = grid_start + n_chart_rows * _CARD_ROW_HEIGHT + 1
 
-    # Left unmet (orange) / right satisfied (green) — matches auditable list layout
+    # Place / time auditable lists
+    cursor = _write_section_banner(
+        ws, row=cursor, title="使用地点 / 使用时刻", desc=CONTEXT_SECTION_DESC
+    )
+    ctx_start = cursor
+    left_ctx = _write_feedback_panel(
+        ws,
+        start_row=ctx_start,
+        col_start=_LEFT_CARD_COLS[0],
+        item_type="使用地点",
+        summary_rows=summary_rows or [],
+        header_fill=_PANEL_HEADER_FILL_CTX,
+        databar_color=_DATABAR_CTX,
+        total_reviews=total_reviews,
+        show_desc=True,
+    )
+    right_ctx = _write_feedback_panel(
+        ws,
+        start_row=ctx_start,
+        col_start=_RIGHT_CARD_COLS[0],
+        item_type="使用时刻",
+        summary_rows=summary_rows or [],
+        header_fill=_PANEL_HEADER_FILL_CTX,
+        databar_color=_DATABAR_CTX,
+        total_reviews=total_reviews,
+        show_desc=True,
+    )
+    cursor = ctx_start + max(left_ctx, right_ctx) + 1
+
+    # Satisfaction / unmet
+    cursor = _write_section_banner(
+        ws,
+        row=cursor,
+        title="需求满足分析（未被满足 / 用户满意）",
+        desc=NEED_FULFILLMENT_SECTION_DESC,
+    )
+    panel_start = cursor
     left_rows = _write_feedback_panel(
         ws,
         start_row=panel_start,
@@ -964,6 +971,7 @@ def _build_overview_sheet(
         header_fill=_PANEL_HEADER_FILL_NEG,
         databar_color=_DATABAR_NEG,
         total_reviews=total_reviews,
+        show_desc=True,
     )
     right_rows = _write_feedback_panel(
         ws,
@@ -974,6 +982,7 @@ def _build_overview_sheet(
         header_fill=_PANEL_HEADER_FILL_POS,
         databar_color=_DATABAR_POS,
         total_reviews=total_reviews,
+        show_desc=True,
     )
 
     return {
@@ -983,8 +992,12 @@ def _build_overview_sheet(
         "label_payloads": label_payloads,
         "feedback_left_rows": left_rows,
         "feedback_right_rows": right_rows,
-        "upper_start": upper_start,
+        "context_left_rows": left_ctx,
+        "context_right_rows": right_ctx,
+        "upper_start": grid_start,
         "feedback_start": panel_start,
+        "context_start": ctx_start,
+        "summary_reserve": "K1:S1",
     }
 
 
@@ -1084,4 +1097,6 @@ def write_analysis_workbook(
         "overview_sheet": OVERVIEW_SHEET_NAME,
         "result_sheet": RESULT_SHEET_NAME,
         "feedback_start": overview_meta.get("feedback_start"),
+        "context_start": overview_meta.get("context_start"),
+        "summary_reserve": overview_meta.get("summary_reserve"),
     }
