@@ -214,7 +214,10 @@ def main() -> int:
     print("THEN: python scripts/step2_ingest_persona.py --workdir ...")
     print("THEN: Fill fulfillment_batches/*/MODEL_OUTPUT.json (Pass2 满意/未被满足)")
     print("THEN: python scripts/step3_ingest_fulfillment.py --workdir ...")
-    print("THEN: python scripts/step4_finalize.py --workdir ... --output ...")
+    print("THEN: python scripts/step4_prepare_normalize.py --workdir ...")
+    print("THEN: Fill normalize_batches/*/MODEL_OUTPUT.json → step5_ingest_normalize.py")
+    print("THEN: python scripts/step6_prepare_summary.py → Fill overview_summary/MODEL_OUTPUT.json")
+    print("THEN: python scripts/step7_finalize.py --workdir ... --output ...")
     return 0
 
 

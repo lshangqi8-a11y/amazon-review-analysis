@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Optional local smoke: fake AI outputs through the V4 pipeline.
+Optional local smoke: fake AI outputs through the V4 7-step pipeline.
 
 Requires explicit paths (no machine-specific defaults):
 
-  python scripts/_e2e_fake.py --input reviews.xlsx --workdir ./tmp_v4_e2e --output ./out.xlsx
+  python scripts/_e2e_fake.py --input reviews.xlsx --workdir ./tmp_v4_e2e --output ./out.xlsx --force
 """
 from __future__ import annotations
 
@@ -52,6 +52,40 @@ def fake_fulfill(reviews):
             items.append({"类型": "未被满足", "原始维度": "易损坏", "单条提炼": "负面体验"})
         results.append({"review_id": rid, "items": items})
     return {"results": results}
+
+
+def fake_normalize(expected_pairs: list[dict]) -> dict:
+    """Identity mapping (enough to exercise normalize → finalize)."""
+    return {
+        "mappings": [
+            {
+                "类型": row["类型"],
+                "原始维度": row["原始维度"],
+                "标准维度": row["原始维度"],
+            }
+            for row in expected_pairs
+        ]
+    }
+
+
+def fake_summary() -> dict:
+    """Fake Pass4 eight-dim overview summary (must cover all 8 sections)."""
+    titles = [
+        "消费人群",
+        "使用地点",
+        "使用时刻",
+        "产品用途",
+        "使用场景",
+        "购买动机",
+        "用户满意",
+        "未被满足",
+    ]
+    return {
+        "sections": [
+            {"title": t, "bullets": [f"[{t}] 冒烟测试要点一", f"[{t}] 冒烟测试要点二"]}
+            for t in titles
+        ]
+    }
 
 
 def main() -> int:
@@ -105,9 +139,34 @@ def main() -> int:
         check=True,
     )
     subprocess.run(
+        [sys.executable, str(ROOT / "scripts/step4_prepare_normalize.py"), "--workdir", str(wd)],
+        check=True,
+    )
+    meta = json.loads((wd / "meta.json").read_text(encoding="utf-8"))
+    for b in meta.get("normalize_batches") or []:
+        bdir = wd / b["path"]
+        expected = json.loads((bdir / "expected_pairs.json").read_text(encoding="utf-8"))
+        (bdir / "MODEL_OUTPUT.json").write_text(
+            json.dumps(fake_normalize(expected), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/step5_ingest_normalize.py"), "--workdir", str(wd)],
+        check=True,
+    )
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/step6_prepare_summary.py"), "--workdir", str(wd)],
+        check=True,
+    )
+    sdir = wd / "overview_summary"
+    (sdir / "MODEL_OUTPUT.json").write_text(
+        json.dumps(fake_summary(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    subprocess.run(
         [
             sys.executable,
-            str(ROOT / "scripts/step4_finalize.py"),
+            str(ROOT / "scripts/step7_finalize.py"),
             "--workdir",
             str(wd),
             "--output",

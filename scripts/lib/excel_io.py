@@ -18,6 +18,7 @@ from openpyxl.utils import get_column_letter
 from .constants import (
     ANALYSIS_SHEET_NAMES,
     CONTEXT_SECTION_DESC,
+    LABEL_OTHER,
     MODULE_DESCRIPTIONS,
     NEED_FULFILLMENT_SECTION_DESC,
     OVERVIEW_CHART_TYPES,
@@ -296,6 +297,8 @@ def _top_rows_for_type(
     min_mentions: int = 0,
 ) -> list[dict]:
     rows = [r for r in summary_rows if (r.get("item_type") or "") == item_type]
+    # Long-tail bucket is for the result sheet audit, not for overview charts.
+    rows = [r for r in rows if str(r.get("dimension") or "") != LABEL_OTHER]
     if min_mentions and int(min_mentions) > 0:
         rows = [r for r in rows if int(r.get("mention_count") or 0) >= int(min_mentions)]
     rows.sort(key=lambda x: (-int(x.get("mention_count") or 0), str(x.get("dimension") or "")))
@@ -305,13 +308,13 @@ def _top_rows_for_type(
 
 
 def _overview_limit_for_type(item_type: str) -> int | None:
-    """None = unlimited. Dict value or global None from OVERVIEW_TOP_N."""
+    """None = unlimited. Dict value, or a global int from OVERVIEW_TOP_N."""
     if OVERVIEW_TOP_N is None:
         return None
     if isinstance(OVERVIEW_TOP_N, dict):
         val = OVERVIEW_TOP_N.get(item_type)
         return None if val is None else int(val)
-    return None
+    return int(OVERVIEW_TOP_N)
 
 
 def _truncate_label(text: str, max_chars: int = 12) -> str:
@@ -342,31 +345,27 @@ def _rate_count_label(item: dict, total_reviews: int = 0) -> str:
 
 
 def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
-    """Compact on-bar label: 7%（7/100）."""
+    """Compact on-bar label: just the percentage (7%)."""
     rate = float(item.get("mention_rate") or 0)
-    count = int(item.get("mention_count") or 0)
-    total = int(total_reviews or 0)
     if abs(rate - round(rate)) < 0.05:
         rate_txt = f"{rate:.0f}"
     else:
         rate_txt = f"{rate:.1f}"
-    if total > 0:
-        return f"{rate_txt}%（{count}/{total}）"
-    return f"{rate_txt}%（{count}）"
+    return f"{rate_txt}%"
 
 
-# Dashboard: left charts/panels (A–M), right AI summary column (O–S)
+# Dashboard: left charts/panels (A–N), right AI summary column (O–U)
 PORTRAIT_TYPES = list(OVERVIEW_CHART_TYPES)
 _CARD_ROW_HEIGHT = 18
 _CHART_WIDTH = 10.5
 _CHART_HEIGHT = 9.0
-_CHART_LEFT_COLS = (1, 6)  # A:F
-_CHART_RIGHT_COLS = (8, 13)  # H:M
-_PANEL_LEFT_COLS = (1, 6)
-_PANEL_RIGHT_COLS = (8, 13)
-_LEFT_ZONE_END = 13  # M
+_CHART_LEFT_COLS = (1, 7)  # A:G
+_CHART_RIGHT_COLS = (9, 14)  # I:N
+_PANEL_LEFT_COLS = (1, 7)
+_PANEL_RIGHT_COLS = (9, 14)
+_LEFT_ZONE_END = 14  # N
 _SUMMARY_COL_START = 15  # O
-_SUMMARY_COL_END = 19  # S
+_SUMMARY_COL_END = 21  # U
 _HIDDEN_START_COL = 24
 _PAGE_FILL = PatternFill("solid", fgColor="F5F5F5")
 _CARD_FILL = PatternFill("solid", fgColor="FFFFFF")
@@ -869,7 +868,7 @@ def _build_overview_sheet(
     product_name: str = "",
     product_category: str = "",
 ) -> dict:
-    """Left A–M charts/panels; right O–S one-shot AI summary. No product fields on dashboard."""
+    """Left A–N charts/panels; right O–U one-shot AI summary. No product fields on dashboard."""
     del voc_items, product_name, product_category
     if OVERVIEW_SHEET_NAME in wb.sheetnames:
         del wb[OVERVIEW_SHEET_NAME]
@@ -900,11 +899,11 @@ def _build_overview_sheet(
     ws.column_dimensions["D"].width = 10
     ws.column_dimensions["E"].width = 11
     ws.column_dimensions["F"].width = 10
-    ws.column_dimensions["G"].width = 2
-    for letter in ("H", "I", "J", "K", "L", "M"):
+    ws.column_dimensions["G"].width = 10
+    ws.column_dimensions["H"].width = 2
+    for letter in ("I", "J", "K", "L", "M", "N"):
         ws.column_dimensions[letter].width = 11
-    ws.column_dimensions["N"].width = 2
-    for letter in ("O", "P", "Q", "R", "S"):
+    for letter in ("O", "P", "Q", "R", "S", "T", "U"):
         ws.column_dimensions[letter].width = 14
 
     hidden_cols = max(12, len(chart_types) * 3)
@@ -1027,7 +1026,7 @@ def _build_overview_sheet(
         "upper_start": grid_start,
         "feedback_start": panel_start,
         "context_start": ctx_start,
-        "summary_reserve": f"O1:S{max(left_end, 2)}",
+        "summary_reserve": f"O1:U{max(left_end, 2)}",
         "has_overview_summary": bool((overview_summary or "").strip()),
     }
 

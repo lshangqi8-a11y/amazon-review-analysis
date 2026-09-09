@@ -2,7 +2,7 @@
 """Build / validate one-shot overview AI summary."""
 from __future__ import annotations
 
-from .constants import VOC_TYPES
+from .constants import LABEL_OTHER, VOC_TYPES
 from .extract_codec import parse_json_content
 
 _ALLOWED_TITLES = set(VOC_TYPES)
@@ -12,7 +12,11 @@ def build_stats_block(summary_rows: list[dict], *, top_n: int = 8) -> str:
     """Plain-text block for the summary user prompt."""
     lines: list[str] = []
     for t in VOC_TYPES:
-        rows = [r for r in (summary_rows or []) if (r.get("item_type") or "") == t]
+        rows = [
+            r
+            for r in (summary_rows or [])
+            if (r.get("item_type") or "") == t and str(r.get("dimension") or "") != LABEL_OTHER
+        ]
         rows.sort(key=lambda x: (-int(x.get("mention_count") or 0), str(x.get("dimension") or "")))
         rows = rows[: max(1, int(top_n))]
         lines.append(f"## {t}")

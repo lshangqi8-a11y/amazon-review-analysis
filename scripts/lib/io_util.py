@@ -34,3 +34,36 @@ def render_template(template: str, variables: dict) -> str:
 def format_product(value: str | None) -> str:
     text = str(value or "").strip()
     return text if text else "（未填写）"
+
+
+_PLACEHOLDER_MARKERS = ("尚未填写",)
+
+
+def is_model_output_placeholder(path: Path) -> bool:
+    """True if missing, empty, or still the Agent fill-me-in stub."""
+    if not path.is_file():
+        return True
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return True
+    if not raw:
+        return True
+    if raw.startswith("/*"):
+        return True
+    return any(m in raw for m in _PLACEHOLDER_MARKERS)
+
+
+def write_model_output_placeholder(path: Path, *, force_reset: bool = False) -> bool:
+    """
+    Write the standard MODEL_OUTPUT stub.
+    Returns True if an existing filled output was preserved (not overwritten).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not force_reset and not is_model_output_placeholder(path):
+        return True
+    path.write_text(
+        "/* Agent: call model with system.md + user.md, save STRICT JSON here */\n",
+        encoding="utf-8",
+    )
+    return False

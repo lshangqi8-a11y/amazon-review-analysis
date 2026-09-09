@@ -89,7 +89,7 @@ def test_dashboard_full() -> None:
         )
         assert meta["chart_count"] == 4
         assert meta.get("has_overview_summary") is True
-        assert str(meta.get("summary_reserve", "")).startswith("O1:S")
+        assert str(meta.get("summary_reserve", "")).startswith("O1:U")
 
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
@@ -102,7 +102,7 @@ def test_dashboard_full() -> None:
 
         joined = []
         for r in range(1, 220):
-            for c in range(1, 20):
+            for c in range(1, 22):
                 v = ov.cell(row=r, column=c).value
                 if v is not None:
                     joined.append(str(v))
@@ -112,6 +112,43 @@ def test_dashboard_full() -> None:
         assert "标准维度数" not in text
         assert "产品名称" not in text
         assert len(ov._charts) == 4
+        wb.close()
+
+
+def test_empty_modules() -> None:
+    """Some dimensions have no data: export must not crash and charts shrink."""
+    skip = {"使用场景", "购买动机"}
+    expected_charts = len([t for t in OVERVIEW_CHART_TYPES if t not in skip])
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        src = td_path / "in.xlsx"
+        out = td_path / "out.xlsx"
+        _write_source(src)
+        meta = write_analysis_workbook(
+            src,
+            out,
+            summary_rows=_full_summary(skip_types=skip),
+            total_reviews=100,
+            voc_items=20,
+            overview_summary=_sample_summary_text(),
+        )
+        # Skipped chart types must not produce charts; remaining ones still do.
+        assert meta["chart_count"] == expected_charts, meta["chart_count"]
+
+        wb = load_workbook(out)
+        ov = wb[OVERVIEW_SHEET_NAME]
+        assert len(ov._charts) == expected_charts
+        joined = []
+        for r in range(1, 220):
+            for c in range(1, 22):
+                v = ov.cell(row=r, column=c).value
+                if v is not None:
+                    joined.append(str(v))
+        text = "\n".join(joined)
+        # Surviving dimensions still rendered
+        assert "消费人群" in text and "厨房" in text
+        # Emptied dimensions must not be fabricated
+        assert "礼赠场合" not in text
         wb.close()
 
 

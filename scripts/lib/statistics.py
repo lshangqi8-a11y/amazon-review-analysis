@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .constants import (
+    LABEL_OTHER,
     OVERVIEW_MIN_MENTIONS,
     REPRESENTATIVE_FEEDBACK_LIMIT,
     VOC_TYPES,
 )
+from .label_consolidate import consolidate_extract_items
 
 _TYPE_ORDER = {name: idx for idx, name in enumerate(VOC_TYPES)}
 
@@ -66,7 +68,12 @@ def filter_main_dimensions(
 ) -> list[dict]:
     # 0 = keep all rows that have any positive mention count
     threshold = max(1, int(min_mentions)) if int(min_mentions or 0) > 0 else 1
-    return [r for r in (summary_rows or []) if int(r.get("mention_count") or 0) >= threshold]
+    return [
+        r
+        for r in (summary_rows or [])
+        if int(r.get("mention_count") or 0) >= threshold
+        and str(r.get("dimension") or "") != LABEL_OTHER
+    ]
 
 
 def build_overview_conclusion(
@@ -110,14 +117,27 @@ def build_overview_conclusion(
     return "\n".join(lines)
 
 
-def aggregate_statistics(items: list[dict], total_reviews: int) -> list[dict]:
+def aggregate_statistics(
+    items: list[dict],
+    total_reviews: int,
+    *,
+    consolidate: bool = False,
+) -> list[dict]:
     """
     Output order follows VOC_TYPES (8 dims).
     within each type: mention_count desc, then dimension name.
+
+    Default consolidate=False: expect AI normalize to have set merged_dimension.
+    Pass consolidate=True only as heuristic emergency fallback.
     """
+    work = (
+        consolidate_extract_items(items, total_reviews=total_reviews)
+        if consolidate
+        else list(items or [])
+    )
     pairs = defaultdict(set)
     items_by_std: dict[tuple[str, str], list[dict]] = defaultdict(list)
-    for it in items:
+    for it in work:
         t = (it.get("item_type") or "").strip()
         d = (it.get("merged_dimension") or it.get("dimension") or "").strip()
         if not t or not d:
@@ -148,6 +168,7 @@ def aggregate_statistics(items: list[dict], total_reviews: int) -> list[dict]:
     rows.sort(
         key=lambda x: (
             _TYPE_ORDER.get(x["item_type"], 999),
+            1 if x["dimension"] == LABEL_OTHER else 0,
             -int(x["mention_count"]),
             x["dimension"] or "",
         )

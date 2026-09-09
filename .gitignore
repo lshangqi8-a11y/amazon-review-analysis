@@ -1,9 +1,14 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Runtime / agent local state — never publish
+_workdir/
 .workdir/
 *_workdir*/
-
-samples/
-
 .workbuddy/
+tmp_v4_e2e/
+*.xlsx
+
+# Keep docs; ignore ad-hoc samples
+samples/

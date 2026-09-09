@@ -40,8 +40,25 @@ EXTRACT_CHUNK_LIMIT = 50
 REPRESENTATIVE_FEEDBACK_LIMIT = 5
 OVERVIEW_SHEET_NAME = "评论分析总览"
 RESULT_SHEET_NAME = "评论分析结果"
-OVERVIEW_TOP_N = None
-OVERVIEW_MIN_MENTIONS = 0
+
+# Overview charts/panels: cap bars for reviewability after AI normalize
+OVERVIEW_TOP_N = {
+    "消费人群": 10,
+    "产品用途": 10,
+    "使用场景": 10,
+    "购买动机": 8,
+    "使用地点": 8,
+    "使用时刻": 8,
+    "用户满意": 12,
+    "未被满足": 12,
+}
+OVERVIEW_MIN_MENTIONS = 1
+
+# Optional heuristic fallback only (AI normalize is primary)
+LABEL_MIN_MENTIONS = 3
+LABEL_MIN_RATE = 0.6
+LABEL_KEEP_TOP = 8
+LABEL_OTHER = "其他（低频）"
 
 # Identity map kept for API compatibility (V4 types are already display names)
 TYPE_DISPLAY_LABELS: dict[str, str] = {}

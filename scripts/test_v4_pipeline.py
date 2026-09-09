@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Smoke tests for V4 dual-pass 8-dim helpers."""
+"""Smoke tests for V4 dual-pass + AI normalize helpers."""
 from __future__ import annotations
 
 import sys
@@ -132,7 +132,17 @@ if __name__ == "__main__":
     test_validate_persona_rejects_fulfillment_type()
     test_workdir_refuse_unknown_nonempty()
     import test_excel_export as tex
+    import test_label_consolidate as tlc
+    import test_normalize_codec as tnc
+    import test_summary_codec as tsc
 
     tex.test_display_labels()
     tex.test_dashboard_full()
+    tex.test_empty_modules()
+    tlc.test_long_tail_bucket_only()
+    tlc.test_overview_top_n_constant()
+    tnc.test_build_rows_dedup_and_count()
+    tnc.test_validate_and_apply()
+    tnc.test_reject_vague_std()
+    tsc.run_all()
     print("ALL_V4_TESTS_PASSED")
