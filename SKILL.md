@@ -50,11 +50,15 @@ description: >-
 
 ### 联网研究（仍在 Step6 一次 Intelligence 内完成，不新增 AI Pass）
 
-当运行环境**具有联网搜索能力**时：
-- 主 Agent 在填写 `review_intelligence/MODEL_OUTPUT.json` 时，可根据人群差异主动检索公开资料
+当存在消费人群及可解释的人群差异，且运行环境**具有联网搜索能力**时：
+- 主 Agent 在填写 `review_intelligence/MODEL_OUTPUT.json` 时，**应主动**检索相关公开资料
 - 用途：解释消费人群差异、辅助产品开发假设
 - 必须保存 `source_title` / `source_url` / `finding`
 - 外部资料**不得**修改 Review 内部统计数字
+
+如果没有值得外部研究的人群差异：
+- `external_research_status = "skipped"`
+- `external_research = []`
 
 当运行环境**没有联网能力**时：
 - `external_research_status = "unavailable"`
