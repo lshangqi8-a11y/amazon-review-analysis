@@ -1,7 +1,10 @@
-# Amazon 评论分析 V4
+# Amazon 评论分析 V5 — Review Intelligence
 
-WorkBuddy / Cursor 可用的独立技能包：**8 维双轮抽取 → AI 维度归一 → 一次全量 AI 总结**。  
-总览左图右文；不要求产品名称/类目。
+WorkBuddy / Cursor 可用的独立技能包：
+**8 维双轮抽取 → AI 维度归一 → Python 统计 → 一次 Review Intelligence → Excel**。
+
+在基础评论洞察之上输出产品决策分析（属性表现、痛点优先级、产品机会、改进建议）。
+不要求产品名称/类目。
 
 ## 快速开始
 

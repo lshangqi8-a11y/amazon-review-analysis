@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Local assertions for V4 Excel: left charts, right AI summary, no product fields."""
+"""Local assertions for V5 Excel: left charts, right AI summary, decision/AI sheets."""
 from __future__ import annotations
 
-import json
 import sys
 import tempfile
 from pathlib import Path
@@ -11,7 +10,15 @@ from openpyxl import Workbook, load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.constants import OVERVIEW_CHART_TYPES, OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME, VOC_TYPES
+from lib.constants import (
+    AI_SUMMARY_SHEET_NAME,
+    DECISION_SHEET_NAME,
+    OVERVIEW_CHART_TYPES,
+    OVERVIEW_SHEET_NAME,
+    RESULT_SHEET_NAME,
+    SEGMENT_SHEET_NAME,
+    VOC_TYPES,
+)
 from lib.excel_io import PORTRAIT_TYPES, type_display_label, write_analysis_workbook
 from lib.statistics import build_theme_insight_summary
 from lib.summary_codec import format_summary_text, validate_summary_payload
@@ -84,8 +91,19 @@ def test_dashboard_full() -> None:
             out,
             summary_rows=_full_summary(),
             total_reviews=100,
+            analyzed_reviews=100,
             voc_items=40,
             overview_summary=summary_text,
+            intelligence={
+                "attribute_performance": [],
+                "pain_priorities": [],
+                "opportunities": [],
+                "recommendations": {
+                    "priority_improvements": [],
+                    "keep_strengths": [],
+                    "explore_opportunities": [],
+                },
+            },
         )
         assert meta["chart_count"] == 4
         assert meta.get("has_overview_summary") is True
@@ -94,11 +112,15 @@ def test_dashboard_full() -> None:
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
         assert ov["A1"].value == "Amazon 评论分析总览"
-        assert "评论总数：100" in str(ov.cell(row=1, column=5).value)
+        assert "有效分析评论数：100" in str(ov.cell(row=1, column=5).value)
         assert ov.cell(row=1, column=15).value == "AI总结"
         body = str(ov.cell(row=2, column=15).value or "")
         assert "消费人群" in body and "未被满足" in body
         assert "产品名称" not in body
+        assert DECISION_SHEET_NAME in wb.sheetnames
+        assert SEGMENT_SHEET_NAME in wb.sheetnames
+        assert AI_SUMMARY_SHEET_NAME in wb.sheetnames
+        assert RESULT_SHEET_NAME in wb.sheetnames
 
         joined = []
         for r in range(1, 220):
@@ -111,6 +133,8 @@ def test_dashboard_full() -> None:
         assert "评论洞察条目数" not in text
         assert "标准维度数" not in text
         assert "产品名称" not in text
+        # Dashboard should not highlight count/total
+        assert "（30/237）" not in text
         assert len(ov._charts) == 4
         wb.close()
 
@@ -129,10 +153,10 @@ def test_empty_modules() -> None:
             out,
             summary_rows=_full_summary(skip_types=skip),
             total_reviews=100,
+            analyzed_reviews=100,
             voc_items=20,
             overview_summary=_sample_summary_text(),
         )
-        # Skipped chart types must not produce charts; remaining ones still do.
         assert meta["chart_count"] == expected_charts, meta["chart_count"]
 
         wb = load_workbook(out)
@@ -145,9 +169,7 @@ def test_empty_modules() -> None:
                 if v is not None:
                     joined.append(str(v))
         text = "\n".join(joined)
-        # Surviving dimensions still rendered
         assert "消费人群" in text and "厨房" in text
-        # Emptied dimensions must not be fabricated
         assert "礼赠场合" not in text
         wb.close()
 
@@ -160,4 +182,5 @@ def test_display_labels() -> None:
 if __name__ == "__main__":
     test_display_labels()
     test_dashboard_full()
+    test_empty_modules()
     print("ALL_EXCEL_TESTS_PASSED")

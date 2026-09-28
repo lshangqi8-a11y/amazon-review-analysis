@@ -15,20 +15,46 @@ from .label_consolidate import consolidate_extract_items
 _TYPE_ORDER = {name: idx for idx, name in enumerate(VOC_TYPES)}
 
 
+def _uniform_sample_indices(n: int, max_n: int) -> list[int]:
+    """Deterministic evenly-spaced indices into a sorted list of length n."""
+    if n <= 0 or max_n <= 0:
+        return []
+    if n <= max_n:
+        return list(range(n))
+    idxs: list[int] = []
+    seen: set[int] = set()
+    for i in range(max_n):
+        pos = int(round(i * (n - 1) / (max_n - 1))) if max_n > 1 else 0
+        if pos not in seen:
+            seen.add(pos)
+            idxs.append(pos)
+    return idxs
+
+
 def pick_representative_feedback(items: list[dict], *, max_n: int = REPRESENTATIVE_FEEDBACK_LIMIT) -> str:
-    texts: list[str] = []
-    seen_rids: set[int] = set()
-    seen_texts: set[str] = set()
-    for it in sorted(items, key=lambda x: int(x.get("review_row") or 0)):
+    """
+    Deterministic uniform sample across unique reviews hit by this dimension.
+    Prefer different review_row; de-dupe texts; stable for same input.
+    """
+    by_row: dict[int, str] = {}
+    for it in sorted(items or [], key=lambda x: int(x.get("review_row") or 0)):
         rid = int(it.get("review_row") or 0)
         text = (it.get("extracted_summary") or "").strip()
-        if not text or rid in seen_rids or text in seen_texts:
+        if not text or rid in by_row:
             continue
-        seen_rids.add(rid)
+        by_row[rid] = text
+    rows = sorted(by_row.items(), key=lambda x: x[0])
+    if not rows:
+        return ""
+    idxs = _uniform_sample_indices(len(rows), max_n)
+    texts: list[str] = []
+    seen_texts: set[str] = set()
+    for i in idxs:
+        text = rows[i][1]
+        if text in seen_texts:
+            continue
         seen_texts.add(text)
         texts.append(text)
-        if len(texts) >= max_n:
-            break
     return "；".join(texts)
 
 
@@ -45,15 +71,14 @@ def split_feedback_snippets(text: str) -> list[str]:
 def build_theme_insight_summary(item: dict) -> str:
     """
     Short theme blurb for overview panels (deterministic, no extra AI call).
-    Result sheet still keeps full joined representative_feedback (up to 5).
+    Dashboard emphasizes mention_rate; count stays for audit sheets.
     """
     dim = str(item.get("dimension") or "").strip()
     snippets = split_feedback_snippets(
         item.get("representative_feedback") or item.get("core_description") or ""
     )
-    count = int(item.get("mention_count") or 0)
     rate = float(item.get("mention_rate") or 0)
-    head = f"「{dim}」出现在 {count} 条评论中（{rate:.2f}%）"
+    head = f"「{dim}」提及率 {rate:.1f}%"
     if not snippets:
         return head + "。"
     if len(snippets) == 1:
@@ -79,22 +104,29 @@ def filter_main_dimensions(
 def build_overview_conclusion(
     summary_rows: list[dict],
     *,
+    analyzed_reviews: int = 0,
     total_reviews: int = 0,
     min_mentions: int = OVERVIEW_MIN_MENTIONS,
 ) -> str:
     """Deterministic one-page conclusion from overview dimensions."""
     main = filter_main_dimensions(summary_rows, min_mentions=min_mentions)
-    total = max(0, int(total_reviews or 0))
+    analyzed = max(0, int(analyzed_reviews or total_reviews or 0))
     thr = int(min_mentions or 0)
     if thr > 1:
-        head = f"基于 {total} 条评论的评论洞察结论（总览仅展示提及≥{thr} 的维度）："
+        head = f"基于 {analyzed} 条有效分析评论的评论洞察结论（总览仅展示提及≥{thr} 的维度）："
     else:
-        head = f"基于 {total} 条评论的评论洞察结论："
+        head = f"基于 {analyzed} 条有效分析评论的评论洞察结论："
     lines = [head]
 
     def tops(item_type: str, n: int = 3) -> list[dict]:
         rows = [r for r in main if (r.get("item_type") or "") == item_type]
-        rows.sort(key=lambda x: (-int(x.get("mention_count") or 0), str(x.get("dimension") or "")))
+        rows.sort(
+            key=lambda x: (
+                -float(x.get("mention_rate") or 0),
+                -int(x.get("mention_count") or 0),
+                str(x.get("dimension") or ""),
+            )
+        )
         return rows[:n]
 
     def fmt(rows: list[dict]) -> str:
@@ -117,21 +149,53 @@ def build_overview_conclusion(
     return "\n".join(lines)
 
 
+def unique_review_count(
+    items: list[dict],
+    *,
+    item_type: str | None = None,
+    dimensions: list[str] | set[str] | None = None,
+) -> int:
+    """Count unique review_row for optional type + dimension filter."""
+    dims = set(dimensions) if dimensions is not None else None
+    seen: set[int] = set()
+    for it in items or []:
+        t = (it.get("item_type") or "").strip()
+        d = (it.get("merged_dimension") or it.get("dimension") or "").strip()
+        if item_type is not None and t != item_type:
+            continue
+        if dims is not None and d not in dims:
+            continue
+        rid = int(it.get("review_row") or 0)
+        if rid:
+            seen.add(rid)
+    return len(seen)
+
+
+def mention_rate(count: int, analyzed_reviews: int) -> float:
+    denom = max(1, int(analyzed_reviews or 1))
+    return round(int(count or 0) * 100.0 / denom, 2)
+
+
 def aggregate_statistics(
     items: list[dict],
-    total_reviews: int,
+    analyzed_reviews: int,
     *,
     consolidate: bool = False,
+    total_reviews: int | None = None,
 ) -> list[dict]:
     """
     Output order follows VOC_TYPES (8 dims).
-    within each type: mention_count desc, then dimension name.
+    within each type: mention_rate desc, then mention_count, then dimension name.
+
+    Denominator is analyzed_reviews (有效分析评论数 / ai_reviews), never empty rows.
+    mention_count = unique review_row count (not item count).
 
     Default consolidate=False: expect AI normalize to have set merged_dimension.
     Pass consolidate=True only as heuristic emergency fallback.
     """
+    del total_reviews  # kept for call-site compatibility; not used as denominator
     work = (
-        consolidate_extract_items(items, total_reviews=total_reviews)
+        consolidate_extract_items(items, total_reviews=analyzed_reviews)
         if consolidate
         else list(items or [])
     )
@@ -146,7 +210,7 @@ def aggregate_statistics(
         pairs[(t, d)].add(rid)
         items_by_std[(t, d)].append(it)
 
-    total = max(1, int(total_reviews or 1))
+    denom = max(1, int(analyzed_reviews or 1))
     rows = []
     for (t, d), review_set in pairs.items():
         count = len(review_set)
@@ -157,7 +221,7 @@ def aggregate_statistics(
             "item_type": t,
             "dimension": d,
             "mention_count": count,
-            "mention_rate": round(count * 100.0 / total, 2),
+            "mention_rate": round(count * 100.0 / denom, 2),
             "core_description": feedback,
             "representative_feedback": feedback,
         }
@@ -169,6 +233,7 @@ def aggregate_statistics(
         key=lambda x: (
             _TYPE_ORDER.get(x["item_type"], 999),
             1 if x["dimension"] == LABEL_OTHER else 0,
+            -float(x["mention_rate"]),
             -int(x["mention_count"]),
             x["dimension"] or "",
         )

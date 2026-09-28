@@ -27,6 +27,8 @@ def test_build_rows_dedup_and_count() -> None:
     assert len(rows) == 2
     easy = next(r for r in rows if r["原始维度"] == "易清洗")
     assert easy["提及次数"] == 2
+    assert isinstance(easy["语义参考"], list)
+    assert len(easy["语义参考"]) == 2
 
 
 def test_validate_and_apply() -> None:
@@ -50,7 +52,7 @@ def test_validate_and_apply() -> None:
     ]
     out = apply_mappings(items, mappings)
     assert {it["merged_dimension"] for it in out} == {"易清洗", "耐用"}
-    rows = aggregate_statistics(out, total_reviews=10, consolidate=False)
+    rows = aggregate_statistics(out, analyzed_reviews=10, consolidate=False)
     sat = [r for r in rows if r["item_type"] == "用户满意"]
     assert len(sat) == 2
     top = next(r for r in sat if r["dimension"] == "易清洗")

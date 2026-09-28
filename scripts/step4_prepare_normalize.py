@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-V4 Step 4: prepare AI dimension-normalize batches (one folder per VOC type).
-Run after persona + fulfillment ingest; before overview summary.
+V5 Step 4: prepare AI dimension-normalize batches (one folder per VOC type).
+Semantic refs: up to 3 per raw dimension from different reviews.
 """
 from __future__ import annotations
 

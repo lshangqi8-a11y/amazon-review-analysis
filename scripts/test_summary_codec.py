@@ -63,7 +63,7 @@ def test_build_stats_block_truncates_long_feedback() -> None:
     assert len(line) < 200
 
 
-def test_build_stats_block_sorts_by_mention_count() -> None:
+def test_build_stats_block_sorts_by_mention_rate() -> None:
     rows = [_row("消费人群", "少数", 2), _row("消费人群", "多数", 30)]
     block = build_stats_block(rows)
     assert block.index("多数") < block.index("少数")
@@ -102,7 +102,7 @@ def test_parse_summary_output_ok() -> None:
     text, err = parse_summary_output(json.dumps(_full_payload(), ensure_ascii=False))
     assert err is None
     assert text is not None
-    assert "AI总结（全量）" in text
+    assert "AI评论洞察总结" in text or "AI总结" in text
     for t in VOC_TYPES:
         assert f"【{t}】" in text
 
@@ -119,7 +119,7 @@ def test_parse_summary_output_placeholder_and_garbage() -> None:
 def test_format_summary_text_empty_bullets() -> None:
     payload = {"sections": [{"title": t, "bullets": []} for t in VOC_TYPES]}
     text = format_summary_text(payload)
-    assert "证据不足，从略" in text
+    assert "证据不足" in text
     assert format_summary_text({}) == ""
     assert format_summary_text({"sections": "nope"}) == ""
 

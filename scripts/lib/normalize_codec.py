@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""V4 normalize mapping parse/validate (AI-driven dimension merge)."""
+"""V5 normalize mapping parse/validate (AI-driven dimension merge)."""
 from __future__ import annotations
 
 import json
 import re
 from collections import defaultdict
 
-from .constants import ALLOWED_TYPES, VOC_TYPES
+from .constants import ALLOWED_TYPES, NORMALIZE_SEMANTIC_REF_LIMIT, VOC_TYPES
 from .extract_codec import parse_json_content
 
 _SAFE_DIR = re.compile(r"[^\w\u4e00-\u9fff\-]+")
@@ -18,9 +18,46 @@ def type_dir_name(item_type: str) -> str:
     return _SAFE_DIR.sub("_", t)
 
 
+def _uniform_pick_texts(candidates: list[tuple[int, str]], *, max_n: int) -> list[str]:
+    """
+    Deterministic uniform sample of (review_row, text) pairs.
+    Prefer different reviews; max_n texts.
+    """
+    if max_n <= 0 or not candidates:
+        return []
+    # unique by review_row, keep first text for that row
+    by_row: dict[int, str] = {}
+    for rid, text in sorted(candidates, key=lambda x: x[0]):
+        text = (text or "").strip()
+        if not text or rid in by_row:
+            continue
+        by_row[rid] = text
+    rows = sorted(by_row.items(), key=lambda x: x[0])
+    if len(rows) <= max_n:
+        return [t for _, t in rows]
+    # Pick at evenly spaced percentiles (0%, 25%, 50%, 75%, 100% style for max_n)
+    n = len(rows)
+    idxs: list[int] = []
+    for i in range(max_n):
+        if max_n == 1:
+            pos = 0
+        else:
+            pos = int(round(i * (n - 1) / (max_n - 1)))
+        idxs.append(pos)
+    # de-dupe indices while preserving order
+    seen_i: set[int] = set()
+    out: list[str] = []
+    for i in idxs:
+        if i in seen_i:
+            continue
+        seen_i.add(i)
+        out.append(rows[i][1])
+    return out
+
+
 def build_normalize_input_rows(items: list[dict]) -> list[dict]:
-    """Unique (类型, 原始维度) with one semantic ref + mention count."""
-    groups: dict[tuple[str, str], dict] = {}
+    """Unique (类型, 原始维度) with up to 3 semantic refs + mention count."""
+    candidates: dict[tuple[str, str], list[tuple[int, str]]] = defaultdict(list)
     counts: dict[tuple[str, str], set[int]] = defaultdict(set)
     for it in items:
         t = (it.get("item_type") or "").strip()
@@ -30,22 +67,42 @@ def build_normalize_input_rows(items: list[dict]) -> list[dict]:
         key = (t, raw)
         rid = int(it.get("review_row") or 0)
         counts[key].add(rid)
-        row_no = rid
-        prev = groups.get(key)
-        if prev is None or row_no < int(prev.get("_row") or 10**9):
-            groups[key] = {
+        text = (it.get("extracted_summary") or "").strip()
+        if text:
+            candidates[key].append((rid, text))
+
+    rows = []
+    for key, cands in candidates.items():
+        t, raw = key
+        refs = _uniform_pick_texts(cands, max_n=NORMALIZE_SEMANTIC_REF_LIMIT)
+        rows.append(
+            {
                 "类型": t,
                 "原始维度": raw,
-                "语义参考": (it.get("extracted_summary") or "").strip(),
-                "_row": row_no,
+                "提及次数": len(counts.get(key) or []),
+                "语义参考": refs,
             }
-    rows = []
-    for key, row in groups.items():
-        row = dict(row)
-        row.pop("_row", None)
-        row["提及次数"] = len(counts.get(key) or [])
-        rows.append(row)
-    rows.sort(key=lambda x: (VOC_TYPES.index(x["类型"]) if x["类型"] in VOC_TYPES else 99, -int(x["提及次数"]), x["原始维度"]))
+        )
+    # Also include dims that somehow have counts but no text
+    for key, rset in counts.items():
+        if key in candidates:
+            continue
+        t, raw = key
+        rows.append(
+            {
+                "类型": t,
+                "原始维度": raw,
+                "提及次数": len(rset),
+                "语义参考": [],
+            }
+        )
+    rows.sort(
+        key=lambda x: (
+            VOC_TYPES.index(x["类型"]) if x["类型"] in VOC_TYPES else 99,
+            -int(x["提及次数"]),
+            x["原始维度"],
+        )
+    )
     return rows
 
 
@@ -55,7 +112,7 @@ def build_normalize_voc_items_block(rows: list[dict]) -> str:
             "类型": r.get("类型") or "",
             "原始维度": r.get("原始维度") or "",
             "提及次数": int(r.get("提及次数") or 0),
-            "语义参考": r.get("语义参考") or "",
+            "语义参考": list(r.get("语义参考") or []),
         }
         for r in rows
     ]
@@ -102,6 +159,9 @@ def validate_normalize_mappings(mappings: list[dict], expected_pairs: set[tuple[
             return f"归一结果原始维度「{raw}」缺少标准维度"
         if std in {"其他", "综合问题", "质量问题", "用户体验", "产品质量", "产品功能", "整体表现"}:
             return f"标准维度禁止空泛标签：{std}"
+        # Opposite-polarity vague buckets are also banned as std names
+        if std in {"尺寸问题", "硬度问题", "重量问题", "安装问题", "松紧问题", "明暗问题"}:
+            return f"标准维度禁止把相反改进动作合并为空泛属性：{std}"
         key = (t, raw)
         if key in covered:
             return f"原始维度重复映射：{t}/{raw}"

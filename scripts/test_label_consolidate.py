@@ -32,7 +32,7 @@ def test_long_tail_bucket_only() -> None:
                 "review_row": rid,
             }
         )
-    rows = aggregate_statistics(items, total_reviews=200, consolidate=True)
+    rows = aggregate_statistics(items, analyzed_reviews=200, consolidate=True)
     motive = [r for r in rows if r["item_type"] == "购买动机"]
     names = {r["dimension"] for r in motive}
     assert "复购囤货" in names

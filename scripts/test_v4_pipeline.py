@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Smoke tests for V4 dual-pass + AI normalize helpers."""
+"""Compat wrapper: V4 suite redirects to V5 acceptance tests."""
 from __future__ import annotations
 
 import sys
@@ -89,12 +89,12 @@ def test_validate_persona_rejects_fulfillment_type() -> None:
     assert err and "非法类型" in err
 
 
-def test_workdir_refuse_unknown_nonempty() -> None:
+def test_workdir_refuse_nonempty_without_force() -> None:
     import json
     import tempfile
     from pathlib import Path
 
-    from step1_prepare import _looks_like_pipeline_workdir, _prepare_workdir
+    from step1_prepare import _prepare_workdir
 
     with tempfile.TemporaryDirectory() as td:
         foreign = Path(td) / "foreign"
@@ -104,7 +104,7 @@ def test_workdir_refuse_unknown_nonempty() -> None:
             _prepare_workdir(foreign, force=False)
             raise AssertionError("expected SystemExit")
         except SystemExit as exc:
-            assert "非空" in str(exc) or "不像" in str(exc)
+            assert "非空" in str(exc)
         assert (foreign / "notes.txt").exists()
 
         ours = Path(td) / "ours"
@@ -112,17 +112,19 @@ def test_workdir_refuse_unknown_nonempty() -> None:
         (ours / "meta.json").write_text(
             json.dumps(
                 {
-                    "skill_version": "v4",
-                    "pipeline": "dual_pass_8dim",
+                    "skill_version": "v5",
+                    "pipeline": "review_intelligence_v5",
                     "persona_batches": [],
                 }
             ),
             encoding="utf-8",
         )
-        assert _looks_like_pipeline_workdir(ours)
-        _prepare_workdir(ours, force=False)
-        assert ours.is_dir()
-        assert not (ours / "meta.json").exists()
+        try:
+            _prepare_workdir(ours, force=False)
+            raise AssertionError("expected SystemExit for own non-empty workdir")
+        except SystemExit as exc:
+            assert "非空" in str(exc)
+        assert (ours / "meta.json").exists()
 
 
 if __name__ == "__main__":
@@ -130,19 +132,8 @@ if __name__ == "__main__":
     test_persona_gatekeep()
     test_fulfillment_gatekeep()
     test_validate_persona_rejects_fulfillment_type()
-    test_workdir_refuse_unknown_nonempty()
-    import test_excel_export as tex
-    import test_label_consolidate as tlc
-    import test_normalize_codec as tnc
-    import test_summary_codec as tsc
+    test_workdir_refuse_nonempty_without_force()
+    import test_v5_pipeline as tv5
 
-    tex.test_display_labels()
-    tex.test_dashboard_full()
-    tex.test_empty_modules()
-    tlc.test_long_tail_bucket_only()
-    tlc.test_overview_top_n_constant()
-    tnc.test_build_rows_dedup_and_count()
-    tnc.test_validate_and_apply()
-    tnc.test_reject_vague_std()
-    tsc.run_all()
-    print("ALL_V4_TESTS_PASSED")
+    tv5.run_all()
+    print("ALL_V4_COMPAT_AND_V5_TESTS_PASSED")

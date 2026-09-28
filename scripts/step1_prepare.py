@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-V4 Step 1: read Excel → write persona_batches + fulfillment_batches for dual-pass AI.
+V5 Step 1: read Excel → write persona_batches + fulfillment_batches for dual-pass AI.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.constants import EXTRACT_CHUNK_LIMIT
+from lib.constants import EXTRACT_CHUNK_LIMIT, SKILL_VERSION
 from lib.excel_io import (
     build_reviews_block,
     count_and_load_reviews,
@@ -22,27 +21,9 @@ from lib.excel_io import (
 from lib.io_util import format_product, read_text, render_template, skill_root, write_json
 
 
-def _looks_like_pipeline_workdir(workdir: Path) -> bool:
-    meta_path = workdir / "meta.json"
-    if not meta_path.is_file():
-        return False
-    try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(meta, dict):
-        return False
-    ver = str(meta.get("skill_version") or "")
-    if not ver.startswith("v"):
-        return False
-    return bool(meta.get("persona_batches") or meta.get("pipeline"))
-
-
 def _prepare_workdir(workdir: Path, *, force: bool) -> None:
     """
-    Create workdir. Refuse to wipe unknown non-empty dirs unless --force.
-    Previous pipeline workdirs (meta.json skill_version) may be replaced when force
-    or when clearly ours; unknown content requires --force.
+    Create workdir. Any non-empty workdir is refused unless --force.
     """
     if not workdir.exists():
         workdir.mkdir(parents=True)
@@ -53,14 +34,13 @@ def _prepare_workdir(workdir: Path, *, force: bool) -> None:
         raise SystemExit(f"无法读取 workdir：{workdir} ({exc})") from exc
     if not non_empty:
         return
-    ours = _looks_like_pipeline_workdir(workdir)
-    if force or ours:
+    if force:
         shutil.rmtree(workdir)
         workdir.mkdir(parents=True)
         return
     raise SystemExit(
-        f"workdir 已存在且非空，且不像本技能流水线目录：{workdir}\n"
-        "请改用空目录，或对确认可覆盖的目录加上 --force。"
+        f"workdir 已存在且非空：{workdir}\n"
+        "为避免误删数据，默认拒绝覆盖。确认可删除后请加 --force。"
     )
 
 
@@ -118,7 +98,7 @@ def _write_pass_batches(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="V4 prepare dual-pass 8-dim extract batches")
+    parser = argparse.ArgumentParser(description="V5 prepare dual-pass 8-dim extract batches")
     parser.add_argument("--input", required=True)
     parser.add_argument("--workdir", required=True)
     parser.add_argument("--product-name", default="")
@@ -130,7 +110,7 @@ def main() -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="覆盖已存在的非空 workdir（默认仅允许覆盖本流水线旧目录）",
+        help="覆盖已存在的非空 workdir（默认一律拒绝删除）",
     )
     args = parser.parse_args()
 
@@ -187,8 +167,8 @@ def main() -> int:
     write_json(
         workdir / "meta.json",
         {
-            "skill_version": "v4",
-            "pipeline": "dual_pass_8dim",
+            "skill_version": SKILL_VERSION,
+            "pipeline": "review_intelligence_v5",
             "input_file": str(input_path),
             "sheet_name": sheet,
             "title_column": title_col,
@@ -198,6 +178,7 @@ def main() -> int:
             "product_name_source": ("cli" if cli_name else ("excel" if auto_name else "empty")),
             "product_category_source": ("cli" if cli_cat else ("excel" if auto_cat else "empty")),
             "total_reviews": len(reviews),
+            "analyzed_reviews": len(ai_reviews),
             "ai_reviews": len(ai_reviews),
             "empty_reviews": len(reviews) - len(ai_reviews),
             "chunk_size": chunk_size,
@@ -208,15 +189,18 @@ def main() -> int:
     write_json(workdir / "reviews.json", reviews)
 
     print(f"workdir={workdir}")
-    print(f"skill_version=v4 total_reviews={len(reviews)} ai_reviews={len(ai_reviews)}")
+    print(
+        f"skill_version={SKILL_VERSION} total_reviews={len(reviews)} "
+        f"analyzed_reviews={len(ai_reviews)}"
+    )
     print(f"persona_batches={len(persona_batches)} fulfillment_batches={len(fulfillment_batches)}")
     print("NEXT: Fill persona_batches/*/MODEL_OUTPUT.json (Pass1 画像六维)")
     print("THEN: python scripts/step2_ingest_persona.py --workdir ...")
-    print("THEN: Fill fulfillment_batches/*/MODEL_OUTPUT.json (Pass2 满意/未被满足)")
+    print("THEN: Fill fulfillment_batches/*/MODEL_OUTPUT.json (Pass2 满意/未被满足 + 信号类型)")
     print("THEN: python scripts/step3_ingest_fulfillment.py --workdir ...")
     print("THEN: python scripts/step4_prepare_normalize.py --workdir ...")
     print("THEN: Fill normalize_batches/*/MODEL_OUTPUT.json → step5_ingest_normalize.py")
-    print("THEN: python scripts/step6_prepare_summary.py → Fill overview_summary/MODEL_OUTPUT.json")
+    print("THEN: python scripts/step6_prepare_summary.py → Fill review_intelligence/MODEL_OUTPUT.json")
     print("THEN: python scripts/step7_finalize.py --workdir ... --output ...")
     return 0
 

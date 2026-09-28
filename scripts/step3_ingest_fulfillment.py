@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""V4 Step 3: ingest fulfillment_batches → fulfillment_items.json"""
+"""V5 Step 3: ingest fulfillment_batches → fulfillment_items.json (with signal_type)."""
 from __future__ import annotations
 
 import argparse

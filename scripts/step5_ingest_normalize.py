@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-V4 Step 5: ingest AI normalize mappings → merged_dimension → summary.json
+V5 Step 5: ingest AI normalize mappings → merged_dimension → summary.json
+Rates use analyzed_reviews as denominator.
 """
 from __future__ import annotations
 
@@ -101,9 +102,10 @@ def main() -> int:
     write_json(workdir / "normalize_mappings.json", all_mappings)
     write_json(workdir / "extract_items.json", normalized)
 
-    total_reviews = int(meta.get("total_reviews") or 0)
+    analyzed = int(meta.get("analyzed_reviews") or meta.get("ai_reviews") or meta.get("total_reviews") or 0)
     # AI normalize is the merge source of truth — no heuristic synonym pass.
-    summary_rows = aggregate_statistics(normalized, total_reviews, consolidate=False)
+    # Denominator = analyzed_reviews (有效分析评论数), not raw total_reviews.
+    summary_rows = aggregate_statistics(normalized, analyzed, consolidate=False)
     write_json(workdir / "summary.json", summary_rows)
 
     stats = mapping_compression_stats(all_mappings)

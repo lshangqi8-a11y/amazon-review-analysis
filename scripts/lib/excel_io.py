@@ -16,8 +16,10 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from .constants import (
+    AI_SUMMARY_SHEET_NAME,
     ANALYSIS_SHEET_NAMES,
     CONTEXT_SECTION_DESC,
+    DECISION_SHEET_NAME,
     LABEL_OTHER,
     MODULE_DESCRIPTIONS,
     NEED_FULFILLMENT_SECTION_DESC,
@@ -28,6 +30,7 @@ from .constants import (
     PRODUCT_CATEGORY_HEADER_CANDIDATES,
     PRODUCT_NAME_HEADER_CANDIDATES,
     RESULT_SHEET_NAME,
+    SEGMENT_SHEET_NAME,
     TYPE_DISPLAY_LABELS,
 )
 from .statistics import build_theme_insight_summary
@@ -301,7 +304,13 @@ def _top_rows_for_type(
     rows = [r for r in rows if str(r.get("dimension") or "") != LABEL_OTHER]
     if min_mentions and int(min_mentions) > 0:
         rows = [r for r in rows if int(r.get("mention_count") or 0) >= int(min_mentions)]
-    rows.sort(key=lambda x: (-int(x.get("mention_count") or 0), str(x.get("dimension") or "")))
+    rows.sort(
+        key=lambda x: (
+            -float(x.get("mention_rate") or 0),
+            -int(x.get("mention_count") or 0),
+            str(x.get("dimension") or ""),
+        )
+    )
     if top_n is None or int(top_n) <= 0:
         return rows
     return rows[: int(top_n)]
@@ -336,16 +345,17 @@ def _first_representative_feedback(text: str) -> str:
 
 
 def _rate_count_label(item: dict, total_reviews: int = 0) -> str:
+    """Dashboard metric: percentage only (counts stay on 评论分析结果)."""
+    del total_reviews
     rate = float(item.get("mention_rate") or 0)
-    count = int(item.get("mention_count") or 0)
-    total = int(total_reviews or 0)
-    if total > 0:
-        return f"{rate:.2f}%（{count}/{total}）"
-    return f"{rate:.2f}%（{count}）"
+    if abs(rate - round(rate)) < 0.05:
+        return f"{rate:.0f}%"
+    return f"{rate:.1f}%"
 
 
 def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
-    """Compact on-bar label: just the percentage (7%)."""
+    """On-bar label: percentage only (e.g. 25%). Never count/total."""
+    del total_reviews
     rate = float(item.get("mention_rate") or 0)
     if abs(rate - round(rate)) < 0.05:
         rate_txt = f"{rate:.0f}"
@@ -406,7 +416,14 @@ def _card_border(ws, r1: int, c1: int, r2: int, c2: int) -> None:
 
 def _ensure_analysis_sheets_at_end(wb, original_sheet_order: list[str]) -> None:
     originals = [n for n in original_sheet_order if n in wb.sheetnames]
-    analysis = [n for n in (OVERVIEW_SHEET_NAME, RESULT_SHEET_NAME) if n in wb.sheetnames]
+    analysis_order = [
+        OVERVIEW_SHEET_NAME,
+        DECISION_SHEET_NAME,
+        SEGMENT_SHEET_NAME,
+        AI_SUMMARY_SHEET_NAME,
+        RESULT_SHEET_NAME,
+    ]
+    analysis = [n for n in analysis_order if n in wb.sheetnames]
     known = set(originals) | set(analysis)
     extras = [n for n in wb.sheetnames if n not in known]
     desired = originals + extras + analysis
@@ -863,6 +880,7 @@ def _build_overview_sheet(
     *,
     summary_rows: list[dict],
     total_reviews: int = 0,
+    analyzed_reviews: int = 0,
     overview_summary: str = "",
     voc_items: int = 0,
     product_name: str = "",
@@ -888,7 +906,12 @@ def _build_overview_sheet(
     ws.merge_cells("A1:D1")
     ws.row_dimensions[1].height = 28
 
-    count_cell = ws.cell(row=1, column=5, value=f"评论总数：{int(total_reviews or 0)}")
+    analyzed = int(analyzed_reviews or total_reviews or 0)
+    total = int(total_reviews or 0)
+    header_metric = f"有效分析评论数：{analyzed}"
+    if total and total != analyzed:
+        header_metric += f"（原始总行：{total}）"
+    count_cell = ws.cell(row=1, column=5, value=header_metric)
     count_cell.font = Font(name="Microsoft YaHei", size=10, color="404040")
     count_cell.alignment = Alignment(vertical="center")
     ws.merge_cells("E1:M1")
@@ -938,7 +961,7 @@ def _build_overview_sheet(
             hidden_val_col=hidden_val,
             hidden_label_col=hidden_label,
             hidden_header_row=1,
-            total_reviews=total_reviews,
+            total_reviews=analyzed,
         )
         module_metas.append(meta)
         if meta.get("chart_title"):
@@ -960,7 +983,7 @@ def _build_overview_sheet(
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_CTX,
         databar_color=_DATABAR_CTX,
-        total_reviews=total_reviews,
+        total_reviews=analyzed,
         show_desc=True,
     )
     right_ctx = _write_feedback_panel(
@@ -972,7 +995,7 @@ def _build_overview_sheet(
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_CTX,
         databar_color=_DATABAR_CTX,
-        total_reviews=total_reviews,
+        total_reviews=analyzed,
         show_desc=True,
     )
     cursor = ctx_start + max(left_ctx, right_ctx) + 1
@@ -992,7 +1015,7 @@ def _build_overview_sheet(
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_NEG,
         databar_color=_DATABAR_NEG,
-        total_reviews=total_reviews,
+        total_reviews=analyzed,
         show_desc=True,
     )
     right_rows = _write_feedback_panel(
@@ -1004,7 +1027,7 @@ def _build_overview_sheet(
         summary_rows=summary_rows or [],
         header_fill=_PANEL_HEADER_FILL_POS,
         databar_color=_DATABAR_POS,
-        total_reviews=total_reviews,
+        total_reviews=analyzed,
         show_desc=True,
     )
     left_end = panel_start + max(left_rows, right_rows)
@@ -1073,6 +1096,344 @@ def _build_result_sheet(wb, summary_rows: list[dict]) -> None:
     ws.row_dimensions[1].height = 22
 
 
+def _write_decision_section_title(ws, row: int, title: str) -> int:
+    cell = ws.cell(row=row, column=1, value=title)
+    cell.font = Font(name="Microsoft YaHei", size=12, bold=True, color="1F4E79")
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+    ws.row_dimensions[row].height = 22
+    return row + 1
+
+
+def _build_decision_sheet(wb, intelligence: dict | None, *, analyzed_reviews: int = 0) -> None:
+    if DECISION_SHEET_NAME in wb.sheetnames:
+        del wb[DECISION_SHEET_NAME]
+    ws = wb.create_sheet(DECISION_SHEET_NAME)
+    intel = intelligence if isinstance(intelligence, dict) else {}
+
+    ws["A1"] = "产品决策分析"
+    ws["A1"].font = _TITLE_FONT
+    ws.merge_cells("A1:F1")
+    ws["A2"] = f"有效分析评论数：{int(analyzed_reviews or 0)}（百分比分母）"
+    ws["A2"].font = Font(name="Microsoft YaHei", size=9, color="666666")
+    row = 4
+
+    row = _write_decision_section_title(ws, row, "一、核心产品属性表现")
+    headers1 = ["产品属性", "正向提及率", "负向提及率", "正向维度", "负向维度", "判断"]
+    for c, h in enumerate(headers1, start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 6)
+    row += 1
+    attrs = intel.get("attribute_performance") or []
+    if not attrs:
+        ws.cell(row=row, column=1, value="（暂无）")
+        row += 1
+    else:
+        for a in attrs:
+            ws.cell(row=row, column=1, value=a.get("attribute") or "")
+            pos_rate = ws.cell(row=row, column=2, value=float(a.get("positive_mention_rate") or 0) / 100.0)
+            neg_rate = ws.cell(row=row, column=3, value=float(a.get("negative_mention_rate") or 0) / 100.0)
+            pos_rate.number_format = "0.0%"
+            neg_rate.number_format = "0.0%"
+            ws.cell(row=row, column=4, value="、".join(a.get("positive_dimensions") or []))
+            ws.cell(row=row, column=5, value="、".join(a.get("negative_dimensions") or []))
+            ws.cell(row=row, column=6, value=a.get("assessment") or "")
+            for c in range(1, 7):
+                ws.cell(row=row, column=c).border = _THIN
+                ws.cell(row=row, column=c).font = _BODY_FONT
+            row += 1
+    row += 1
+
+    row = _write_decision_section_title(ws, row, "二、痛点优先级")
+    headers2 = ["痛点", "提及率", "严重程度", "优先级", "原因"]
+    for c, h in enumerate(headers2, start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 5)
+    row += 1
+    pains = intel.get("pain_priorities") or []
+    if not pains:
+        ws.cell(row=row, column=1, value="（暂无）")
+        row += 1
+    else:
+        for p in pains:
+            ws.cell(row=row, column=1, value=p.get("dimension") or "")
+            rate_cell = ws.cell(row=row, column=2, value=float(p.get("mention_rate") or 0) / 100.0)
+            rate_cell.number_format = "0.0%"
+            ws.cell(row=row, column=3, value=p.get("severity") or "")
+            ws.cell(row=row, column=4, value=p.get("priority") or "")
+            ws.cell(row=row, column=5, value=p.get("reason") or "")
+            for c in range(1, 6):
+                ws.cell(row=row, column=c).border = _THIN
+                ws.cell(row=row, column=c).font = _BODY_FONT
+                ws.cell(row=row, column=c).alignment = Alignment(wrap_text=True, vertical="top")
+            row += 1
+    row += 1
+
+    row = _write_decision_section_title(ws, row, "三、用户明确需求 / 产品机会")
+    headers3 = ["产品机会", "提及率", "来源维度", "证据信号"]
+    for c, h in enumerate(headers3, start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 4)
+    row += 1
+    opps = intel.get("opportunities") or []
+    if not opps:
+        ws.cell(row=row, column=1, value="（暂无）")
+        row += 1
+    else:
+        for o in opps:
+            ws.cell(row=row, column=1, value=o.get("opportunity") or "")
+            rate_cell = ws.cell(row=row, column=2, value=float(o.get("mention_rate") or 0) / 100.0)
+            rate_cell.number_format = "0.0%"
+            ws.cell(row=row, column=3, value="、".join(o.get("source_dimensions") or []))
+            ws.cell(row=row, column=4, value="、".join(o.get("evidence_signals") or []))
+            for c in range(1, 5):
+                ws.cell(row=row, column=c).border = _THIN
+                ws.cell(row=row, column=c).font = _BODY_FONT
+            row += 1
+    row += 1
+
+    row = _write_decision_section_title(ws, row, "四、产品改进建议")
+    recs = intel.get("recommendations") or {}
+    blocks = [
+        ("优先优化", recs.get("priority_improvements") or []),
+        ("建议保留", recs.get("keep_strengths") or []),
+        ("可探索机会", recs.get("explore_opportunities") or []),
+    ]
+    for label, arr in blocks:
+        ws.cell(row=row, column=1, value=label).font = Font(
+            name="Microsoft YaHei", size=10, bold=True
+        )
+        row += 1
+        if not arr:
+            ws.cell(row=row, column=1, value="（暂无）")
+            row += 1
+            continue
+        for item in arr:
+            if isinstance(item, dict):
+                action = item.get("action") or ""
+                evidence = item.get("evidence") or ""
+                text = f"{action}" + (f"（依据：{evidence}）" if evidence else "")
+            else:
+                text = str(item)
+            cell = ws.cell(row=row, column=1, value=f"• {text}")
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=5)
+            ws.row_dimensions[row].height = 28
+            row += 1
+        row += 1
+
+    for idx, width in enumerate([18, 12, 12, 28, 28, 14], start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+
+def _build_segment_sheet(
+    wb,
+    segment_analysis: dict | None,
+    intelligence: dict | None,
+    *,
+    analyzed_reviews: int = 0,
+) -> None:
+    """消费人群深度分析：概览 / 差异 / 洞察 / 外部知识 / 产品开发方向。"""
+    if SEGMENT_SHEET_NAME in wb.sheetnames:
+        del wb[SEGMENT_SHEET_NAME]
+    ws = wb.create_sheet(SEGMENT_SHEET_NAME)
+    analysis = segment_analysis if isinstance(segment_analysis, dict) else {}
+    si = {}
+    if isinstance(intelligence, dict):
+        si = intelligence.get("segment_intelligence") or {}
+
+    ws["A1"] = "消费人群深度分析"
+    ws["A1"].font = _TITLE_FONT
+    ws.merge_cells("A1:G1")
+    ws["A2"] = (
+        f"有效分析评论数：{int(analyzed_reviews or 0)}｜"
+        "人群占比分母=analyzed_reviews；组内关联分母=该人群样本数｜"
+        "【评论数据事实】与【外部研究】【产品开发推论】分列"
+    )
+    ws["A2"].font = Font(name="Microsoft YaHei", size=9, color="666666")
+    row = 4
+
+    row = _write_decision_section_title(ws, row, "A. 人群概览【评论数据事实】")
+    for c, h in enumerate(["人群", "样本数", "占有效评论比例", "样本状态"], start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 4)
+    row += 1
+    segs = analysis.get("segments") or []
+    if not segs:
+        ws.cell(row=row, column=1, value="（暂无消费人群维度）")
+        row += 2
+    else:
+        for s in segs:
+            ws.cell(row=row, column=1, value=s.get("segment") or "")
+            ws.cell(row=row, column=2, value=int(s.get("mention_count") or 0))
+            rate = ws.cell(row=row, column=3, value=float(s.get("mention_rate") or 0) / 100.0)
+            rate.number_format = "0.0%"
+            ws.cell(row=row, column=4, value=s.get("sample_status") or "")
+            for c in range(1, 5):
+                ws.cell(row=row, column=c).border = _THIN
+                ws.cell(row=row, column=c).font = _BODY_FONT
+            row += 1
+        row += 1
+
+    row = _write_decision_section_title(ws, row, "B. 人群差异【评论数据事实】")
+    headers_b = ["指标", "人群A", "人群B", "A提及率", "B提及率", "差异pp", "检验", "备注"]
+    for c, h in enumerate(headers_b, start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 8)
+    row += 1
+    comps = analysis.get("comparisons") or []
+    if not comps:
+        ws.cell(row=row, column=1, value="（暂无）")
+        row += 2
+    else:
+        for c in comps:
+            metric = f"{c.get('metric_type')}/{c.get('dimension')}"
+            ws.cell(row=row, column=1, value=metric)
+            ws.cell(row=row, column=2, value=c.get("segment_a") or "")
+            ws.cell(row=row, column=3, value=c.get("segment_b") or "")
+            ra = ws.cell(row=row, column=4, value=float(c.get("rate_a") or 0) / 100.0)
+            rb = ws.cell(row=row, column=5, value=float(c.get("rate_b") or 0) / 100.0)
+            ra.number_format = "0.0%"
+            rb.number_format = "0.0%"
+            ws.cell(row=row, column=6, value=float(c.get("pp_diff") or 0))
+            method = c.get("test_method") or ""
+            p = c.get("p_value")
+            oratio = (c.get("effect_size") or {}).get("odds_ratio")
+            test_txt = f"{method} p={p}" if p is not None else f"{method} n/a"
+            if oratio is not None:
+                test_txt += f" OR={oratio}"
+            ws.cell(row=row, column=7, value=test_txt)
+            ws.cell(row=row, column=8, value=c.get("note") or c.get("sample_status") or "")
+            for col in range(1, 9):
+                ws.cell(row=row, column=col).border = _THIN
+                ws.cell(row=row, column=col).font = _BODY_FONT
+                ws.cell(row=row, column=col).alignment = Alignment(wrap_text=True, vertical="top")
+            row += 1
+        row += 1
+
+    row = _write_decision_section_title(ws, row, "C. 人群洞察【评论数据事实】")
+    headers_c = ["人群", "用途", "场景", "动机", "满意", "未满足", "产品属性"]
+    for c, h in enumerate(headers_c, start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 7)
+    row += 1
+
+    def _top_join(assoc: dict, key: str, n: int = 3) -> str:
+        rows = (assoc.get(key) or [])[:n]
+        if not rows:
+            return "—"
+        return "；".join(f"{r.get('dimension')}({float(r.get('mention_rate') or 0):.0f}%)" for r in rows)
+
+    if not segs:
+        ws.cell(row=row, column=1, value="（暂无）")
+        row += 2
+    else:
+        for s in segs:
+            assoc = s.get("associations") or {}
+            ws.cell(row=row, column=1, value=s.get("segment") or "")
+            ws.cell(row=row, column=2, value=_top_join(assoc, "产品用途"))
+            ws.cell(row=row, column=3, value=_top_join(assoc, "使用场景"))
+            ws.cell(row=row, column=4, value=_top_join(assoc, "购买动机"))
+            ws.cell(row=row, column=5, value=_top_join(assoc, "用户满意"))
+            ws.cell(row=row, column=6, value=_top_join(assoc, "未被满足"))
+            ws.cell(row=row, column=7, value=_top_join(assoc, "产品属性"))
+            for col in range(1, 8):
+                ws.cell(row=row, column=col).border = _THIN
+                ws.cell(row=row, column=col).font = _BODY_FONT
+                ws.cell(row=row, column=col).alignment = Alignment(wrap_text=True, vertical="top")
+            ws.row_dimensions[row].height = 36
+            row += 1
+        row += 1
+
+    row = _write_decision_section_title(ws, row, "D. 外部知识增强【外部研究】")
+    status = (si.get("external_research_status") if isinstance(si, dict) else None) or "unavailable"
+    ws.cell(row=row, column=1, value=f"状态：{status}")
+    row += 1
+    for c, h in enumerate(["研究主题", "结论", "来源标题", "来源URL", "支持的内部发现"], start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 5)
+    row += 1
+    ext = (si.get("external_research") if isinstance(si, dict) else None) or []
+    if status != "ok" or not ext:
+        ws.cell(row=row, column=1, value="（不可用/已跳过，未伪造来源）")
+        row += 2
+    else:
+        for e in ext:
+            ws.cell(row=row, column=1, value=e.get("topic") or "")
+            ws.cell(row=row, column=2, value=e.get("finding") or "")
+            ws.cell(row=row, column=3, value=e.get("source_title") or "")
+            ws.cell(row=row, column=4, value=e.get("source_url") or "")
+            ws.cell(row=row, column=5, value=e.get("supports") or "")
+            for col in range(1, 6):
+                ws.cell(row=row, column=col).border = _THIN
+                ws.cell(row=row, column=col).font = _BODY_FONT
+                ws.cell(row=row, column=col).alignment = Alignment(wrap_text=True, vertical="top")
+            row += 1
+        row += 1
+
+    row = _write_decision_section_title(ws, row, "E. 产品开发方向【产品开发推论】")
+    for c, h in enumerate(["目标人群", "数据依据", "外部依据", "建议验证方向"], start=1):
+        ws.cell(row=row, column=c, value=h)
+    _style_header_row(ws, row, 1, 4)
+    row += 1
+    opps = (si.get("segment_product_opportunities") if isinstance(si, dict) else None) or []
+    # Fallback: AI segment development implications
+    if not opps and isinstance(si, dict):
+        for s in si.get("segments") or []:
+            if not isinstance(s, dict):
+                continue
+            for impl in s.get("development_implications") or []:
+                opps.append(
+                    {
+                        "segment": s.get("segment"),
+                        "opportunity": impl,
+                        "review_evidence": s.get("important_attributes") or [],
+                        "external_evidence": [],
+                        "recommendation": impl,
+                    }
+                )
+    if not opps:
+        ws.cell(row=row, column=1, value="（暂无）")
+        row += 1
+    else:
+        for o in opps:
+            ws.cell(row=row, column=1, value=o.get("segment") or "")
+            ws.cell(row=row, column=2, value="、".join(o.get("review_evidence") or []))
+            ws.cell(row=row, column=3, value="、".join(o.get("external_evidence") or []) or "—")
+            ws.cell(
+                row=row,
+                column=4,
+                value=o.get("recommendation") or o.get("opportunity") or "",
+            )
+            for col in range(1, 5):
+                ws.cell(row=row, column=col).border = _THIN
+                ws.cell(row=row, column=col).font = _BODY_FONT
+                ws.cell(row=row, column=col).alignment = Alignment(wrap_text=True, vertical="top")
+            row += 1
+
+    for idx, width in enumerate([22, 16, 16, 12, 12, 10, 28, 28], start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+
+def _build_ai_summary_sheet(wb, summary_text: str) -> None:
+    """Copyable plain-text summary: A1 title, A2 full text (not merged)."""
+    if AI_SUMMARY_SHEET_NAME in wb.sheetnames:
+        del wb[AI_SUMMARY_SHEET_NAME]
+    ws = wb.create_sheet(AI_SUMMARY_SHEET_NAME)
+    ws["A1"] = "AI评论洞察总结"
+    ws["A1"].font = _TITLE_FONT
+    ws["A1"].alignment = Alignment(vertical="center")
+    ws.row_dimensions[1].height = 24
+
+    text = (summary_text or "").strip() or "（尚未生成 AI 总结）"
+    cell = ws["A2"]
+    cell.value = text
+    cell.font = Font(name="Microsoft YaHei", size=10, color="303030")
+    cell.alignment = Alignment(wrap_text=True, vertical="top")
+    # Tall enough for typical copy-paste; user can expand further
+    ws.row_dimensions[2].height = min(409, max(120, 14 * (text.count("\n") + 2)))
+    ws.column_dimensions["A"].width = 100
+
+
 def write_analysis_workbook(
     source_path: str | Path,
     output_path: str | Path,
@@ -1081,10 +1442,13 @@ def write_analysis_workbook(
     product_name: str = "",
     product_category: str = "",
     total_reviews: int = 0,
+    analyzed_reviews: int = 0,
     voc_items: int | None = None,
     overview_summary: str = "",
+    intelligence: dict | None = None,
+    segment_analysis: dict | None = None,
 ) -> dict:
-    """Keep original sheets; append dashboard overview + result at end."""
+    """Keep original sheets; append overview / decision / segment / AI总结 / result."""
     source_path = Path(source_path)
     if source_path.exists():
         wb = load_workbook(source_path)
@@ -1101,16 +1465,26 @@ def write_analysis_workbook(
     summary_rows = list(summary_rows or [])
     if voc_items is None:
         voc_items = 0
+    analyzed = int(analyzed_reviews or total_reviews or 0)
 
     overview_meta = _build_overview_sheet(
         wb,
         summary_rows=summary_rows,
         total_reviews=total_reviews,
+        analyzed_reviews=analyzed,
         overview_summary=overview_summary or "",
         voc_items=int(voc_items or 0),
         product_name=product_name or "",
         product_category=product_category or "",
     )
+    _build_decision_sheet(wb, intelligence, analyzed_reviews=analyzed)
+    _build_segment_sheet(
+        wb,
+        segment_analysis,
+        intelligence,
+        analyzed_reviews=analyzed,
+    )
+    _build_ai_summary_sheet(wb, overview_summary or "")
     _build_result_sheet(wb, summary_rows)
     _ensure_analysis_sheets_at_end(wb, original_sheet_order)
 
@@ -1127,6 +1501,9 @@ def write_analysis_workbook(
         "chart_count": int(overview_meta.get("chart_count") or 0),
         "module_metas": overview_meta.get("module_metas") or [],
         "overview_sheet": OVERVIEW_SHEET_NAME,
+        "decision_sheet": DECISION_SHEET_NAME,
+        "segment_sheet": SEGMENT_SHEET_NAME,
+        "ai_summary_sheet": AI_SUMMARY_SHEET_NAME,
         "result_sheet": RESULT_SHEET_NAME,
         "feedback_start": overview_meta.get("feedback_start"),
         "context_start": overview_meta.get("context_start"),

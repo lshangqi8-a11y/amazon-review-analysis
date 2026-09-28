@@ -1,16 +1,17 @@
 ---
-name: amazon-review-analysis-v4
+name: amazon-review-analysis-v5
 description: >-
-  Amazon review analysis V4: 8-dim dual-pass, AI dimension normalize, then
-  one-shot AI overview summary. Left charts/panels, right summary.
+  Amazon review analysis V5 Review Intelligence: 8-dim dual-pass, AI normalize,
+  one-shot intelligence (attribute / pain / opportunity / recommendations),
+  Excel overview + decision + copyable AI summary.
   No product name/category required.
-  Use for 评论分析 V4 / 八维 / 维度归一 / AI总结 / 未被满足.
+  Use for 评论分析 V5 / Review Intelligence / 八维 / 维度归一 / 产品决策 / 痛点优先级.
 ---
 
-# Amazon 评论分析 V4
+# Amazon 评论分析 V5 — Review Intelligence
 
-**八维双轮抽取 → AI 维度归一 → 一次全量 AI 总结**。  
-**不要求、不展示产品名称/类目**。版本见 `VERSION`。
+**八维双轮抽取 → AI 维度归一 → Python 统计 → 一次 Review Intelligence → Excel**。
+在基础评论洞察之上增加产品决策分析。不要求、不展示产品名称/类目。版本见 `VERSION`。
 
 将本仓库根目录作为 `SKILL_ROOT`（WorkBuddy / Cursor Skill 下载后的技能包路径）。
 
@@ -19,28 +20,38 @@ description: >-
 1. **禁止使用子代理 / 并行 Agent** 处理任何批次。全程仅由主会话串行执行：逐个批次「读 `user.md` → 写 `MODEL_OUTPUT.json`」。
 2. 中断后必须用 `--allow-partial` 续跑，**不得**开子代理补跑缺失批次。
 3. 抽取与归一都依赖同一会话串行统一标签；任何并行都会导致标签碎片化，一律视为执行错误。
+4. **不要为四个决策模块分别调用 AI**；只在最后一次 `review_intelligence` 一次输出。
 
-## 八维
+## 八维（一级类型冻结）
 
 | 轮次 | 类型 |
 |------|------|
 | Pass1 画像 | 消费人群 · 使用地点 · 使用时刻 · 产品用途 · 使用场景 · 购买动机 |
-| Pass2 满足 | 用户满意 · **未被满足** |
-| Pass3 **归一** | 按类型将近义「原始维度」合并为「标准维度」（通用、偏合并） |
-| Pass4 总结 | 基于归一后的 `summary.json` 一次生成八维总览文案 |
+| Pass2 满足 | 用户满意 · **未被满足**（含信号类型） |
+| Pass3 **归一** | 按类型将近义「原始维度」合并为「标准维度」（业务含义+改进动作一致才合并） |
+| Pass4 Intelligence | 八维总结 + 属性表现 + 痛点优先级 + 产品机会 + 改进建议 |
 
-## 为何需要 AI 归一
+尺寸/包装/价格/材质等属于属性层，**不**新增为一级维度。
 
-抽取阶段即使提示「同义复用」，跨批次仍易产生近义微标签。  
-**全局通用做法**：在统计出表前加一轮模型归一（按一级类型隔离、大胆合并），而不是维护品类同义词表。
+## 百分比规则
 
-总览仍限制各维 Top N 柱图，避免审查页过载。
+```text
+mention_rate = 命中该维度的唯一有效评论数 / analyzed_reviews × 100%
+```
 
-## 总览布局
+- 分母 = `analyzed_reviews`（实际参与 AI 分析的有效评论）
+- `total_reviews` 仅作审计
+- 同一 Review 对同一标准维度只计 1 次
 
-- **左侧 A–N**：柱图（人群/用途/场景/动机）+ 地点|时刻列表 + 未被满足|满意列表  
-- **右侧 O–U**：AI总结（全量）  
-- 页眉仅「评论总数」
+## Excel 结构
+
+分析 Sheet 放在最后：
+
+1. 评论分析总览 — 八维图表/面板 + AI 概览
+2. 产品决策分析 — 属性 / 痛点 / 机会 / 建议
+3. 消费人群深度分析 — 人群发现 / 差异 / 外部研究 / 细分开发方向
+4. AI总结 — A2 纯文本可一键复制
+5. 评论分析结果 — 命中数审计
 
 ## 依赖
 
@@ -57,7 +68,7 @@ WORKDIR="<任务工作目录>"
 python "$SKILL_ROOT/scripts/step1_prepare.py" --input "reviews.xlsx" --workdir "$WORKDIR"
 # AI → persona_batches/*/MODEL_OUTPUT.json
 python "$SKILL_ROOT/scripts/step2_ingest_persona.py" --workdir "$WORKDIR"
-# AI → fulfillment_batches/*/MODEL_OUTPUT.json
+# AI → fulfillment_batches/*/MODEL_OUTPUT.json（含信号类型）
 python "$SKILL_ROOT/scripts/step3_ingest_fulfillment.py" --workdir "$WORKDIR"
 
 python "$SKILL_ROOT/scripts/step4_prepare_normalize.py" --workdir "$WORKDIR"
@@ -65,13 +76,15 @@ python "$SKILL_ROOT/scripts/step4_prepare_normalize.py" --workdir "$WORKDIR"
 python "$SKILL_ROOT/scripts/step5_ingest_normalize.py" --workdir "$WORKDIR"
 
 python "$SKILL_ROOT/scripts/step6_prepare_summary.py" --workdir "$WORKDIR"
-# AI → overview_summary/MODEL_OUTPUT.json
+# AI → review_intelligence/MODEL_OUTPUT.json
 python "$SKILL_ROOT/scripts/step7_finalize.py" --workdir "$WORKDIR" --output "评论洞察分析结果.xlsx"
 ```
 
 不要因缺少产品名称/类目而中断。JSON 错误不能当成功。
 
-重跑 `step4_prepare_normalize` / `step6_prepare_summary` 时，**已填写的 `MODEL_OUTPUT.json` 默认保留**；只有占位符会被刷新。若要强制清空重填，加 `--force-reset`。
+重跑 `step4_prepare_normalize` / `step6_prepare_summary` 时，**已填写的 `MODEL_OUTPUT.json` 默认保留**；若 Intelligence 输入 hash 变化则自动失效。强制清空加 `--force-reset`。
+
+`step1`：workdir 非空时默认拒绝覆盖，必须显式 `--force`。
 
 ## 大批量与断点续跑
 
@@ -84,6 +97,6 @@ python "$SKILL_ROOT/scripts/step7_finalize.py" --workdir "$WORKDIR" --output "�
 ## 本地冒烟（可选）
 
 ```bash
-python "$SKILL_ROOT/scripts/_e2e_fake.py" --input reviews.xlsx --workdir ./tmp_v4_e2e --output ./out.xlsx --force
-python "$SKILL_ROOT/scripts/test_v4_pipeline.py"
+python "$SKILL_ROOT/scripts/_e2e_fake.py" --input reviews.xlsx --workdir ./tmp_v5_e2e --output ./out.xlsx --force
+python "$SKILL_ROOT/scripts/test_v5_pipeline.py"
 ```
