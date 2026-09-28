@@ -14,10 +14,10 @@ from .constants import (
     OPPORTUNITY_SIGNAL_TYPES,
     PRIORITY_LEVELS,
     SEVERITY_LEVELS,
-    SKILL_VERSION_NUMBER,
     VOC_TYPES,
 )
 from .extract_codec import parse_json_content
+from .segment_stats import segment_dim_cooccur
 from .statistics import mention_rate, unique_review_count
 
 _ALLOWED_TITLES = set(VOC_TYPES)
@@ -105,68 +105,33 @@ def build_stats_block(summary_rows: list[dict], *, top_n: int = 8) -> str:
     return "\n".join(lines).strip()
 
 
-def build_intelligence_hash_payload(
+def compute_intelligence_input_hash(
     *,
-    analyzed_reviews: int,
-    summary_rows: list[dict],
-    items: list[dict],
-    segment_analysis: dict | None = None,
+    system_prompt: str,
+    user_prompt: str,
     schema_version: str = INTELLIGENCE_SCHEMA_VERSION,
-    skill_version: str = SKILL_VERSION_NUMBER,
-) -> dict:
-    """Canonical payload for SHA256 input hash (no AI percentages)."""
-    summary_compact = [
-        {
-            "item_type": r.get("item_type"),
-            "dimension": r.get("dimension"),
-            "mention_count": int(r.get("mention_count") or 0),
-            "mention_rate": float(r.get("mention_rate") or 0),
-            "representative_feedback": r.get("representative_feedback") or "",
-        }
-        for r in (summary_rows or [])
-    ]
-    signals = []
-    for it in items or []:
-        t = (it.get("item_type") or "").strip()
-        if t not in {"用户满意", "未被满足"}:
-            continue
-        signals.append(
-            {
-                "item_type": t,
-                "dimension": (it.get("merged_dimension") or it.get("dimension") or "").strip(),
-                "signal_type": (it.get("signal_type") or "").strip(),
-                "review_row": int(it.get("review_row") or 0),
-            }
-        )
-    signals.sort(key=lambda x: (x["item_type"], x["dimension"], x["signal_type"], x["review_row"]))
-    seg = segment_analysis or {}
-    seg_compact = {
-        "known_segments": list(seg.get("known_segments") or []),
-        "comparisons": [
-            {
-                "segment_a": c.get("segment_a"),
-                "segment_b": c.get("segment_b"),
-                "metric_type": c.get("metric_type"),
-                "dimension": c.get("dimension"),
-                "pp_diff": c.get("pp_diff"),
-                "p_value": c.get("p_value"),
-            }
-            for c in (seg.get("comparisons") or [])
-        ],
-    }
-    return {
-        "analyzed_reviews": int(analyzed_reviews or 0),
-        "schema_version": schema_version,
-        "skill_version": skill_version,
-        "summary": summary_compact,
-        "fulfillment_signals": signals,
-        "segment_analysis": seg_compact,
-    }
-
-
-def compute_input_hash(payload: dict) -> str:
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+) -> str:
+    """
+    Stale-output hash based on what the AI actually receives:
+    SHA256(system_prompt + user_prompt + schema_version).
+    """
+    raw = f"{system_prompt or ''}\n---\n{user_prompt or ''}\n---\n{schema_version or ''}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+# Backward-compatible alias used by older tests / call sites
+def compute_input_hash(payload: dict | str, *args, **kwargs) -> str:
+    if isinstance(payload, dict) and "system_prompt" in payload:
+        return compute_intelligence_input_hash(
+            system_prompt=str(payload.get("system_prompt") or ""),
+            user_prompt=str(payload.get("user_prompt") or ""),
+            schema_version=str(payload.get("schema_version") or INTELLIGENCE_SCHEMA_VERSION),
+        )
+    # Legacy dict hash (tests that still pass structured payload)
+    if isinstance(payload, dict):
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return hashlib.sha256(str(payload or "").encode("utf-8")).hexdigest()
 
 
 def _as_str_list(value, *, field: str) -> tuple[list[str], str | None]:
@@ -186,6 +151,7 @@ def validate_segment_intelligence(
     *,
     known_segments: set[str] | None = None,
     known_dims: dict[str, set[str]] | None = None,
+    items: list[dict] | None = None,
 ) -> str | None:
     """Validate segment_intelligence block; None/missing is allowed when no segments."""
     if si is None:
@@ -209,7 +175,7 @@ def validate_segment_intelligence(
         summary = str(row.get("summary") or "").strip()
         if not summary:
             return f"segment_intelligence.segments[{i}].summary 不能为空"
-        attrs, err = _as_str_list(
+        _, err = _as_str_list(
             row.get("important_attributes") or [],
             field=f"segment_intelligence.segments[{i}].important_attributes",
         )
@@ -299,6 +265,14 @@ def validate_segment_intelligence(
             for d in evidence:
                 if d not in all_known_dims:
                     return f"segment_product_opportunities[{i}] 引用未知标准维度：{d}"
+        # Hard rule: each evidence dim must co-occur with the segment on ≥1 review
+        if items is not None:
+            for d in evidence:
+                if segment_dim_cooccur(items, seg, d) < 1:
+                    return (
+                        f"segment_product_opportunities[{i}] 证据「{d}」"
+                        f"未与人群「{seg}」共现于同一评论"
+                    )
     return None
 
 
@@ -307,6 +281,7 @@ def validate_intelligence_payload(
     *,
     known_dims: dict[str, set[str]] | None = None,
     known_segments: set[str] | None = None,
+    items: list[dict] | None = None,
 ) -> str | None:
     """
     Strict schema + optional unknown-dimension rejection.
@@ -460,6 +435,7 @@ def validate_intelligence_payload(
         payload.get("segment_intelligence"),
         known_segments=known_segments,
         known_dims=known_dims,
+        items=items,
     )
     if si_err:
         return si_err
@@ -642,7 +618,6 @@ def enrich_intelligence(
                 ],
                 "mention_count": int(base.get("mention_count") or 0),
                 "mention_rate": float(base.get("mention_rate") or 0),
-                "sample_status": base.get("sample_status") or "",
                 "associations": base.get("associations") or {},
             }
         )
@@ -821,12 +796,9 @@ def format_intelligence_text(enriched: dict) -> str:
             n = s.get("mention_count")
             rate = s.get("mention_rate")
             summary = s.get("summary") or ""
-            status = s.get("sample_status") or ""
             line = f"  - {name}"
             if n is not None:
                 line += f"（n={n}，{float(rate or 0):.1f}%）"
-            if status:
-                line += f"｜{status}"
             if summary:
                 line += f"：{summary}"
             chunks.append(line)
@@ -894,6 +866,7 @@ def parse_intelligence_output(
         payload,
         known_dims=known,
         known_segments=known_segments,
+        items=items,
     )
     if err:
         return None, "", err

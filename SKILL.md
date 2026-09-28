@@ -33,6 +33,34 @@ description: >-
 
 尺寸/包装/价格/材质等属于属性层，**不**新增为一级维度。
 
+## 消费人群深度分析（Python + Step6 解释）
+
+流程保持简单：
+
+```text
+消费人群发现 → n / 占比 → 人群内部用途·场景·动机·满意·未满足·属性
+→ 人群间百分比差异 pp →（可选）联网解释 → 产品开发启发
+```
+
+规则：
+- n≥1 即可分析；Excel 展示 n，由使用者自行判断样本量
+- **不做** Fisher / χ² / p value / 显著性门槛
+- 人群产品机会的 `review_evidence` 必须与该人群共现于同一条评论
+- 禁止把全 ASIN 痛点随意归给某人群
+
+### 联网研究（仍在 Step6 一次 Intelligence 内完成，不新增 AI Pass）
+
+当运行环境**具有联网搜索能力**时：
+- 主 Agent 在填写 `review_intelligence/MODEL_OUTPUT.json` 时，可根据人群差异主动检索公开资料
+- 用途：解释消费人群差异、辅助产品开发假设
+- 必须保存 `source_title` / `source_url` / `finding`
+- 外部资料**不得**修改 Review 内部统计数字
+
+当运行环境**没有联网能力**时：
+- `external_research_status = "unavailable"`
+- `external_research = []`
+- **不得**因此中断整个 Skill，也不得伪造来源
+
 ## 百分比规则
 
 ```text
@@ -83,6 +111,8 @@ python "$SKILL_ROOT/scripts/step7_finalize.py" --workdir "$WORKDIR" --output "�
 不要因缺少产品名称/类目而中断。JSON 错误不能当成功。
 
 重跑 `step4_prepare_normalize` / `step6_prepare_summary` 时，**已填写的 `MODEL_OUTPUT.json` 默认保留**；若 Intelligence 输入 hash 变化则自动失效。强制清空加 `--force-reset`。
+
+`review_intelligence` 的 `input_hash` = `SHA256(system_prompt + user_prompt + schema_version)`，即基于实际送给 AI 的内容。
 
 `step1`：workdir 非空时默认拒绝覆盖，必须显式 `--force`。
 

@@ -22,14 +22,15 @@
 【segment_intelligence】
 只能引用 Python 给出的 known 人群名（消费人群标准维度）。
 必须严格区分三类信息：
-- 【评论数据事实】：只能复述/解释 Python 已给出的 n、率、pp、检验结果
+- 【评论数据事实】：只能复述/解释 Python 已给出的 n、率、pp
 - 【外部研究】：仅用于解释差异机制或补充公开行业/使用/安全知识；必须有 source_title + source_url
 - 【产品开发推论】：可提出假设与验证方向，但不得伪装成评论事实
 
-样本规则：
-- n<10：标记样本不足，禁止写强结论 / 禁止据此宣称产品机会成立
-- n>=10：可做方向性比较
-- 统计检验只是辅助；大 pp 差异即使 p>0.05 也要关注；p<0.05 不自动等于产品机会
+人群规则：
+- n≥1 即可分析与输出产品机会；不要因样本量小而拒绝输出
+- 不要做 Fisher / χ² / p value / 显著性判断
+- Excel 会展示 n，由使用者自行判断样本量
+- segment_product_opportunities.review_evidence 中的每个标准维度，必须来自该人群评论的真实共现（同一 review），禁止把全 ASIN 痛点随意归给某人群
 
 外部研究降级：
 - 若无法可靠联网核实来源：external_research_status = "unavailable" 或 "skipped"，external_research 必须为空数组

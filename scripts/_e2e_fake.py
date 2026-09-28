@@ -91,8 +91,9 @@ def fake_normalize(expected_pairs: list[dict]) -> dict:
     }
 
 
-def fake_intelligence(summary_rows: list[dict]) -> dict:
+def fake_intelligence(summary_rows: list[dict], items: list[dict] | None = None) -> dict:
     """Fake Pass4 Review Intelligence covering all required blocks."""
+    from lib.segment_stats import segment_dim_cooccur
     titles = [
         "消费人群",
         "使用地点",
@@ -167,16 +168,26 @@ def fake_intelligence(summary_rows: list[dict]) -> dict:
             }
         )
     seg_opps = []
-    if people and unmet:
-        seg_opps.append(
-            {
-                "segment": people[0],
-                "opportunity": f"针对「{people[0]}」优先处理「{unmet[0]}」",
-                "review_evidence": [unmet[0]],
-                "external_evidence": [],
-                "recommendation": "【产品开发推论】先用小样验证，再扩量",
-            }
-        )
+    work_items = items or []
+    for p in people:
+        for d in unmet:
+            if work_items and segment_dim_cooccur(work_items, p, d) < 1:
+                continue
+            if not work_items:
+                # No items available: skip evidence-bound opportunities
+                continue
+            seg_opps.append(
+                {
+                    "segment": p,
+                    "opportunity": f"针对「{p}」优先处理「{d}」",
+                    "review_evidence": [d],
+                    "external_evidence": [],
+                    "recommendation": "【产品开发推论】先用小样验证，再扩量",
+                }
+            )
+            break
+        if seg_opps:
+            break
     return {
         "sections": [
             {"title": t, "bullets": [f"[{t}] 冒烟测试要点一", f"[{t}] 冒烟测试要点二"]}
@@ -290,9 +301,14 @@ def main() -> int:
         check=True,
     )
     summary_rows = json.loads((wd / "summary.json").read_text(encoding="utf-8"))
+    extract_items = json.loads((wd / "extract_items.json").read_text(encoding="utf-8"))
     sdir = wd / "review_intelligence"
     (sdir / "MODEL_OUTPUT.json").write_text(
-        json.dumps(fake_intelligence(summary_rows), ensure_ascii=False, indent=2),
+        json.dumps(
+            fake_intelligence(summary_rows, extract_items),
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
     subprocess.run(

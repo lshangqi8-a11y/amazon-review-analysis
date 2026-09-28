@@ -19,6 +19,7 @@
 4. 禁止依赖或编造具体产品名/类目
 5. 禁止提出没有评论证据的新功能
 6. segment_intelligence 必须把【评论数据事实】【外部研究】【产品开发推论】分开；无法联网则 external_research_status=unavailable 且 external_research=[]
+7. 人群产品机会的 review_evidence 必须是该人群评论中真实共现的标准维度；n≥1 即可输出机会，不要做显著性检验
 
 必须严格按下方 Output Schema 返回合法 JSON。
 

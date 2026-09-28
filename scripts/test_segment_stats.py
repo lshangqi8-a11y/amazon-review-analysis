@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for consumer segment deep analysis."""
+"""Tests for simplified consumer segment deep analysis."""
 from __future__ import annotations
 
 import json
@@ -14,28 +14,26 @@ from openpyxl import Workbook, load_workbook
 from lib.constants import (
     AI_SUMMARY_SHEET_NAME,
     DECISION_SHEET_NAME,
+    INTELLIGENCE_SCHEMA_VERSION,
     OVERVIEW_SHEET_NAME,
     RESULT_SHEET_NAME,
     SEGMENT_SHEET_NAME,
     VOC_TYPES,
 )
 from lib.excel_io import write_analysis_workbook
-from lib.intelligence_codec import parse_intelligence_output, validate_intelligence_payload
+from lib.intelligence_codec import (
+    compute_intelligence_input_hash,
+    parse_intelligence_output,
+    validate_intelligence_payload,
+)
 from lib.segment_stats import (
-    MIN_DIRECTIONAL_N,
     build_segment_analysis,
-    compare_metric,
     discover_segments,
-    fisher_exact_2x2,
+    segment_dim_cooccur,
 )
 
 
 def _items_two_segments() -> list[dict]:
-    """
-    Segment A 大型犬主人: reviews 1-12
-    Segment B 小型犬主人: reviews 13-20
-    Shared / distinct associations.
-    """
     items = []
     for rid in range(1, 13):
         items.append(
@@ -75,7 +73,6 @@ def _items_two_segments() -> list[dict]:
                 "review_row": rid,
             }
         )
-    # A few large-dog reviews also mention durability pain
     for rid in (1, 2, 3, 4, 5, 6):
         items.append(
             {
@@ -87,7 +84,7 @@ def _items_two_segments() -> list[dict]:
                 "signal_type": "明确问题",
             }
         )
-    # Same review hits multiple dims — should not double-count segment
+    # Same review hits segment twice — dedup
     items.append(
         {
             "item_type": "消费人群",
@@ -100,107 +97,62 @@ def _items_two_segments() -> list[dict]:
     return items
 
 
-def test_unique_review_and_share() -> None:
-    items = _items_two_segments()
-    analyzed = 30
-    segs = discover_segments(items, analyzed)
-    by = {s["segment"]: s for s in segs}
-    assert by["大型犬主人"]["mention_count"] == 12
-    assert by["小型犬主人"]["mention_count"] == 8
-    assert by["大型犬主人"]["mention_rate"] == 40.0  # 12/30
-    assert by["小型犬主人"]["mention_rate"] == round(8 * 100 / 30, 2)
-
-
-def test_dedup_same_review() -> None:
-    items = _items_two_segments()
-    segs = discover_segments(items, 30)
-    large = next(s for s in segs if s["segment"] == "大型犬主人")
-    assert large["mention_count"] == 12  # not 13
-
-
-def test_pp_and_fisher_inputs() -> None:
-    items = _items_two_segments()
-    analysis = build_segment_analysis(items, 30)
-    comps = analysis["comparisons"]
-    assert comps
-    # Find chew metric comparison
-    chew = [
-        c
-        for c in comps
-        if c["dimension"] == "高强度撕咬" and {c["segment_a"], c["segment_b"]} == {"大型犬主人", "小型犬主人"}
+def test_n1_segment_analyzable() -> None:
+    items = [
+        {
+            "item_type": "消费人群",
+            "merged_dimension": "通勤者",
+            "dimension": "通勤者",
+            "extracted_summary": "commute",
+            "review_row": 1,
+        },
+        {
+            "item_type": "用户满意",
+            "merged_dimension": "便携",
+            "dimension": "便携",
+            "extracted_summary": "portable",
+            "review_row": 1,
+            "signal_type": "满意点",
+        },
     ]
-    assert chew
-    c = chew[0]
-    if c["segment_a"] == "大型犬主人":
-        assert c["rate_a"] == 100.0
-        assert c["rate_b"] == 0.0
-        assert c["pp_diff"] == 100.0
-        assert c["hit_a"] == 12 and c["hit_b"] == 0
-        assert c["n_a"] == 12 and c["n_b"] == 8
-    else:
-        assert c["rate_b"] == 100.0
-        assert abs(c["pp_diff"]) == 100.0
-    # Fisher table should match hits
-    table = c["test"]["fisher"]["table"]
-    assert table[0][0] + table[0][1] in (12, 8)
-    assert c["test"]["fisher"]["applicable"] is True
-    assert c["p_value"] is not None
+    analysis = build_segment_analysis(items, analyzed_reviews=10)
+    assert analysis["known_segments"] == ["通勤者"]
+    seg = analysis["segments"][0]
+    assert seg["mention_count"] == 1
+    assert seg["mention_rate"] == 10.0
+    assert seg["associations"]["用户满意"][0]["dimension"] == "便携"
+    assert seg["associations"]["用户满意"][0]["mention_rate"] == 100.0
 
 
-def test_fisher_known_table() -> None:
-    # Classic 2x2
-    r = fisher_exact_2x2(1, 9, 11, 3)
-    assert r["applicable"] is True
-    assert 0.0 <= r["p_value"] <= 1.0
-    assert r["odds_ratio"] is not None
-
-
-def test_small_n_no_strong_conclusion() -> None:
+def test_n_lt_10_can_emit_opportunity() -> None:
+    """n<10 must NOT block product opportunity output."""
     items = []
-    for rid in range(1, 6):
+    for rid in range(1, 4):
         items.append(
             {
                 "item_type": "消费人群",
-                "dimension": "新手",
                 "merged_dimension": "新手",
+                "dimension": "新手",
                 "extracted_summary": "n",
                 "review_row": rid,
             }
         )
         items.append(
             {
-                "item_type": "用户满意",
-                "dimension": "易用",
-                "merged_dimension": "易用",
-                "extracted_summary": "e",
+                "item_type": "未被满足",
+                "merged_dimension": "说明书不足",
+                "dimension": "说明书不足",
+                "extracted_summary": "doc",
                 "review_row": rid,
+                "signal_type": "明确需求",
             }
         )
-    for rid in range(6, 10):
-        items.append(
-            {
-                "item_type": "消费人群",
-                "dimension": "资深用户",
-                "merged_dimension": "资深用户",
-                "extracted_summary": "p",
-                "review_row": rid,
-            }
-        )
-    analysis = build_segment_analysis(items, 20)
-    for s in analysis["segments"]:
-        assert s["sample_status"] == "样本不足"
-        assert s["mention_count"] < MIN_DIRECTIONAL_N
-    for c in analysis["comparisons"]:
-        assert c["allow_strong_conclusion"] is False
-        assert "样本不足" in (c.get("note") or c.get("sample_status") or "")
-
-
-def test_external_research_unavailable_ok() -> None:
     summary = [
-        {"item_type": t, "dimension": f"{t}维", "mention_count": 2, "mention_rate": 10.0}
+        {"item_type": t, "dimension": "维", "mention_count": 1, "mention_rate": 5.0}
         for t in VOC_TYPES
     ]
-    summary[0]["dimension"] = "新手"
+    summary[0] = {"item_type": "消费人群", "dimension": "新手", "mention_count": 3, "mention_rate": 30.0}
+    summary[7] = {"item_type": "未被满足", "dimension": "说明书不足", "mention_count": 3, "mention_rate": 30.0}
     payload = {
         "sections": [{"title": t, "bullets": ["ok"]} for t in VOC_TYPES],
         "attribute_performance": [],
@@ -215,9 +167,175 @@ def test_external_research_unavailable_ok() -> None:
             "segments": [
                 {
                     "segment": "新手",
-                    "summary": "样本有限",
+                    "summary": "n=3 仍可解读",
                     "important_attributes": [],
-                    "development_implications": ["先观察"],
+                    "development_implications": ["简化引导"],
+                }
+            ],
+            "comparisons": [],
+            "external_research_status": "unavailable",
+            "external_research": [],
+            "segment_product_opportunities": [
+                {
+                    "segment": "新手",
+                    "opportunity": "加强说明书",
+                    "review_evidence": ["说明书不足"],
+                    "recommendation": "出简明卡片",
+                }
+            ],
+        },
+    }
+    seg = build_segment_analysis(items, 10)
+    assert seg["segments"][0]["mention_count"] == 3
+    enriched, text, err = parse_intelligence_output(
+        json.dumps(payload, ensure_ascii=False),
+        summary_rows=summary,
+        items=items,
+        analyzed_reviews=10,
+        segment_analysis=seg,
+    )
+    assert err is None, err
+    assert enriched["segment_intelligence"]["segment_product_opportunities"]
+    assert "消费人群深度分析" in text
+
+
+def test_unique_review_dedup() -> None:
+    items = _items_two_segments()
+    segs = discover_segments(items, 30)
+    large = next(s for s in segs if s["segment"] == "大型犬主人")
+    assert large["mention_count"] == 12
+
+
+def test_within_segment_rate_and_share() -> None:
+    items = _items_two_segments()
+    analyzed = 30
+    analysis = build_segment_analysis(items, analyzed)
+    by = {s["segment"]: s for s in analysis["segments"]}
+    assert by["大型犬主人"]["mention_rate"] == 40.0
+    chew = by["大型犬主人"]["associations"]["产品用途"][0]
+    assert chew["dimension"] == "高强度撕咬"
+    assert chew["mention_rate"] == 100.0  # 12/12
+
+
+def test_pp_diff() -> None:
+    items = _items_two_segments()
+    analysis = build_segment_analysis(items, 30)
+    chew = [
+        c
+        for c in analysis["comparisons"]
+        if c["dimension"] == "高强度撕咬"
+        and {c["segment_a"], c["segment_b"]} == {"大型犬主人", "小型犬主人"}
+    ]
+    assert chew
+    c = chew[0]
+    assert abs(c["pp_diff"]) == 100.0
+    assert "p_value" not in c
+    assert "test" not in c
+    assert "sample_status" not in c
+
+
+def test_opportunity_requires_segment_cooccurrence() -> None:
+    # 不耐咬 only on large-dog reviews; assigning to 小型犬主人 must fail
+    items = _items_two_segments()
+    summary = [
+        {"item_type": t, "dimension": "维", "mention_count": 1, "mention_rate": 5.0}
+        for t in VOC_TYPES
+    ]
+    summary[0] = {"item_type": "消费人群", "dimension": "小型犬主人", "mention_count": 8, "mention_rate": 26.7}
+    summary.append(
+        {"item_type": "消费人群", "dimension": "大型犬主人", "mention_count": 12, "mention_rate": 40.0}
+    )
+    summary[7] = {"item_type": "未被满足", "dimension": "不耐咬", "mention_count": 6, "mention_rate": 20.0}
+    # Fix known dims: both segments present
+    known_dims = {t: {"维"} for t in VOC_TYPES}
+    known_dims["消费人群"] = {"大型犬主人", "小型犬主人"}
+    known_dims["未被满足"] = {"不耐咬", "维"}
+    payload = {
+        "sections": [{"title": t, "bullets": ["ok"]} for t in VOC_TYPES],
+        "attribute_performance": [],
+        "pain_priorities": [],
+        "opportunities": [],
+        "recommendations": {
+            "priority_improvements": [],
+            "keep_strengths": [],
+            "explore_opportunities": [],
+        },
+        "segment_intelligence": {
+            "segments": [],
+            "comparisons": [],
+            "external_research_status": "skipped",
+            "external_research": [],
+            "segment_product_opportunities": [
+                {
+                    "segment": "小型犬主人",
+                    "opportunity": "误归痛点",
+                    "review_evidence": ["不耐咬"],
+                    "recommendation": "不应通过",
+                }
+            ],
+        },
+    }
+    err = validate_intelligence_payload(
+        payload,
+        known_dims=known_dims,
+        known_segments={"大型犬主人", "小型犬主人"},
+        items=items,
+    )
+    assert err and "共现" in err
+    # Correct assignment to 大型犬主人 passes
+    assert segment_dim_cooccur(items, "大型犬主人", "不耐咬") >= 1
+    assert segment_dim_cooccur(items, "小型犬主人", "不耐咬") == 0
+    payload["segment_intelligence"]["segment_product_opportunities"][0]["segment"] = "大型犬主人"
+    err2 = validate_intelligence_payload(
+        payload,
+        known_dims=known_dims,
+        known_segments={"大型犬主人", "小型犬主人"},
+        items=items,
+    )
+    assert err2 is None, err2
+
+
+def test_external_research_unavailable_ok() -> None:
+    items = [
+        {
+            "item_type": "消费人群",
+            "merged_dimension": "新手",
+            "dimension": "新手",
+            "review_row": 1,
+            "extracted_summary": "x",
+        },
+        {
+            "item_type": "未被满足",
+            "merged_dimension": "说明书不足",
+            "dimension": "说明书不足",
+            "review_row": 1,
+            "extracted_summary": "y",
+            "signal_type": "明确需求",
+        },
+    ]
+    summary = [
+        {"item_type": t, "dimension": "维", "mention_count": 1, "mention_rate": 5.0}
+        for t in VOC_TYPES
+    ]
+    summary[0]["dimension"] = "新手"
+    summary[7]["dimension"] = "说明书不足"
+    payload = {
+        "sections": [{"title": t, "bullets": ["ok"]} for t in VOC_TYPES],
+        "attribute_performance": [],
+        "pain_priorities": [],
+        "opportunities": [],
+        "recommendations": {
+            "priority_improvements": [],
+            "keep_strengths": [],
+            "explore_opportunities": [],
+        },
+        "segment_intelligence": {
+            "segments": [
+                {
+                    "segment": "新手",
+                    "summary": "ok",
+                    "important_attributes": [],
+                    "development_implications": ["观察"],
                 }
             ],
             "comparisons": [],
@@ -227,24 +345,12 @@ def test_external_research_unavailable_ok() -> None:
                 {
                     "segment": "新手",
                     "opportunity": "简化上手",
-                    "review_evidence": ["新手维"],
-                    "recommendation": "验证引导流程",
+                    "review_evidence": ["说明书不足"],
+                    "recommendation": "验证引导",
                 }
             ],
         },
     }
-    # Fix review_evidence to known dim
-    payload["segment_intelligence"]["segment_product_opportunities"][0]["review_evidence"] = ["新手"]
-    # 消费人群 dim is 新手 — put in known_dims via summary
-    items = [
-        {
-            "item_type": "消费人群",
-            "merged_dimension": "新手",
-            "dimension": "新手",
-            "review_row": 1,
-            "extracted_summary": "x",
-        }
-    ]
     seg = build_segment_analysis(items, 10)
     enriched, text, err = parse_intelligence_output(
         json.dumps(payload, ensure_ascii=False),
@@ -255,14 +361,96 @@ def test_external_research_unavailable_ok() -> None:
     )
     assert err is None, err
     assert enriched["segment_intelligence"]["external_research_status"] == "unavailable"
-    assert "消费人群深度分析" in text
+
+
+def test_input_hash_follows_prompts() -> None:
+    h1 = compute_intelligence_input_hash(
+        system_prompt="SYS-A",
+        user_prompt="USER-A",
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
+    )
+    h2 = compute_intelligence_input_hash(
+        system_prompt="SYS-B",
+        user_prompt="USER-A",
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
+    )
+    h3 = compute_intelligence_input_hash(
+        system_prompt="SYS-A",
+        user_prompt="USER-B",
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
+    )
+    h1b = compute_intelligence_input_hash(
+        system_prompt="SYS-A",
+        user_prompt="USER-A",
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
+    )
+    assert h1 == h1b
+    assert h1 != h2
+    assert h1 != h3
+
+
+def test_excel_segment_sheet() -> None:
+    items = _items_two_segments()
+    analysis = build_segment_analysis(items, 30)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "in.xlsx"
+        out = Path(td) / "out.xlsx"
+        wb = Workbook()
+        wb.active.title = "Reviews"
+        wb["Reviews"].append(["标题", "内容"])
+        wb.save(src)
+        wb.close()
+        text = "AI评论洞察总结\n\n【消费人群深度分析】\n· 主要人群：\n  - 大型犬主人（n=12）"
+        meta = write_analysis_workbook(
+            src,
+            out,
+            summary_rows=[
+                {
+                    "item_type": "消费人群",
+                    "dimension": "大型犬主人",
+                    "mention_count": 12,
+                    "mention_rate": 40.0,
+                    "representative_feedback": "x",
+                    "theme_summary": "「大型犬主人」提及率 40.0%。",
+                }
+            ],
+            total_reviews=30,
+            analyzed_reviews=30,
+            overview_summary=text,
+            intelligence={
+                "segment_intelligence": {
+                    "segments": [],
+                    "comparisons": [],
+                    "external_research_status": "unavailable",
+                    "external_research": [],
+                    "segment_product_opportunities": [],
+                }
+            },
+            segment_analysis=analysis,
+        )
+        assert meta["sheetnames"][-5:] == [
+            OVERVIEW_SHEET_NAME,
+            DECISION_SHEET_NAME,
+            SEGMENT_SHEET_NAME,
+            AI_SUMMARY_SHEET_NAME,
+            RESULT_SHEET_NAME,
+        ]
+        wb2 = load_workbook(out)
+        ws = wb2[SEGMENT_SHEET_NAME]
+        assert ws["A1"].value == "消费人群深度分析"
+        # Overview headers: 人群 / 评论数 n / 占有效评论比例 — no 样本状态
+        joined = " ".join(
+            str(ws.cell(row=r, column=c).value or "")
+            for r in range(1, 40)
+            for c in range(1, 9)
+        )
+        assert "样本状态" not in joined
+        assert "Fisher" not in joined and "χ²" not in joined and "p=" not in joined
+        assert "消费人群深度分析" in str(wb2[AI_SUMMARY_SHEET_NAME]["A2"].value)
+        wb2.close()
 
 
 def test_reject_unknown_segment() -> None:
-    summary = [
-        {"item_type": t, "dimension": "维", "mention_count": 1, "mention_rate": 5.0}
-        for t in VOC_TYPES
-    ]
     payload = {
         "sections": [{"title": t, "bullets": ["ok"]} for t in VOC_TYPES],
         "attribute_performance": [],
@@ -292,89 +480,9 @@ def test_reject_unknown_segment() -> None:
         payload,
         known_dims={t: {"维"} for t in VOC_TYPES},
         known_segments={"新手"},
+        items=[],
     )
     assert err and "未知人群" in err
-
-
-def test_excel_segment_sheet_and_ai_summary() -> None:
-    items = _items_two_segments()
-    analysis = build_segment_analysis(items, 30)
-    with tempfile.TemporaryDirectory() as td:
-        src = Path(td) / "in.xlsx"
-        out = Path(td) / "out.xlsx"
-        wb = Workbook()
-        wb.active.title = "Reviews"
-        wb["Reviews"].append(["标题", "内容"])
-        wb.save(src)
-        wb.close()
-        text = (
-            "AI评论洞察总结\n\n【消费人群】\n· x\n\n"
-            "【消费人群深度分析】\n· 主要人群：\n  - 大型犬主人\n· 人群差异：\n  - a vs b\n"
-            "· 外部研究解释：\n  - unavailable\n· 人群细分产品开发方向：\n  - 验证耐咬"
-        )
-        intel = {
-            "attribute_performance": [],
-            "pain_priorities": [],
-            "opportunities": [],
-            "recommendations": {},
-            "segment_intelligence": {
-                "segments": [
-                    {
-                        "segment": "大型犬主人",
-                        "summary": "主群",
-                        "important_attributes": ["耐咬性"],
-                        "development_implications": ["加强结构"],
-                        "mention_count": 12,
-                        "mention_rate": 40.0,
-                    }
-                ],
-                "comparisons": [
-                    {
-                        "segment_a": "大型犬主人",
-                        "segment_b": "小型犬主人",
-                        "finding": "用途差异明显",
-                    }
-                ],
-                "external_research_status": "unavailable",
-                "external_research": [],
-                "segment_product_opportunities": [],
-            },
-        }
-        meta = write_analysis_workbook(
-            src,
-            out,
-            summary_rows=[
-                {
-                    "item_type": "消费人群",
-                    "dimension": "大型犬主人",
-                    "mention_count": 12,
-                    "mention_rate": 40.0,
-                    "representative_feedback": "x",
-                    "theme_summary": "「大型犬主人」提及率 40.0%。",
-                }
-            ],
-            total_reviews=30,
-            analyzed_reviews=30,
-            overview_summary=text,
-            intelligence=intel,
-            segment_analysis=analysis,
-        )
-        assert SEGMENT_SHEET_NAME in meta["sheetnames"]
-        assert meta["sheetnames"][-5:] == [
-            OVERVIEW_SHEET_NAME,
-            DECISION_SHEET_NAME,
-            SEGMENT_SHEET_NAME,
-            AI_SUMMARY_SHEET_NAME,
-            RESULT_SHEET_NAME,
-        ]
-        wb2 = load_workbook(out)
-        assert SEGMENT_SHEET_NAME in wb2.sheetnames
-        ai = wb2[AI_SUMMARY_SHEET_NAME]
-        assert "消费人群深度分析" in str(ai["A2"].value)
-        assert not list(ai.merged_cells.ranges)
-        ws = wb2[SEGMENT_SHEET_NAME]
-        assert ws["A1"].value == "消费人群深度分析"
-        wb2.close()
 
 
 def run_all() -> None:

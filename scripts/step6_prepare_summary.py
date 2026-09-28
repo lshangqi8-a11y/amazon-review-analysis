@@ -18,10 +18,9 @@ from lib.constants import (
     SKILL_VERSION_NUMBER,
 )
 from lib.intelligence_codec import (
-    build_intelligence_hash_payload,
     build_signal_block,
     build_stats_block,
-    compute_input_hash,
+    compute_intelligence_input_hash,
 )
 from lib.io_util import (
     is_model_output_placeholder,
@@ -109,13 +108,11 @@ def main() -> int:
         },
     )
 
-    hash_payload = build_intelligence_hash_payload(
-        analyzed_reviews=analyzed,
-        summary_rows=summary_rows,
-        items=items,
-        segment_analysis=segment_analysis,
+    input_hash = compute_intelligence_input_hash(
+        system_prompt=system_tpl,
+        user_prompt=user_msg,
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
     )
-    input_hash = compute_input_hash(hash_payload)
 
     sdir = workdir / INTELLIGENCE_DIR_NAME
     sdir.mkdir(parents=True, exist_ok=True)

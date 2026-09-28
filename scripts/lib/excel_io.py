@@ -1246,16 +1246,17 @@ def _build_segment_sheet(
     ws.merge_cells("A1:G1")
     ws["A2"] = (
         f"有效分析评论数：{int(analyzed_reviews or 0)}｜"
-        "人群占比分母=analyzed_reviews；组内关联分母=该人群样本数｜"
+        "人群占比分母=analyzed_reviews；组内关联分母=该人群评论数 n｜"
+        "展示 n 供使用者自行判断样本量｜无显著性检验｜"
         "【评论数据事实】与【外部研究】【产品开发推论】分列"
     )
     ws["A2"].font = Font(name="Microsoft YaHei", size=9, color="666666")
     row = 4
 
     row = _write_decision_section_title(ws, row, "A. 人群概览【评论数据事实】")
-    for c, h in enumerate(["人群", "样本数", "占有效评论比例", "样本状态"], start=1):
+    for c, h in enumerate(["人群", "评论数 n", "占有效评论比例"], start=1):
         ws.cell(row=row, column=c, value=h)
-    _style_header_row(ws, row, 1, 4)
+    _style_header_row(ws, row, 1, 3)
     row += 1
     segs = analysis.get("segments") or []
     if not segs:
@@ -1267,15 +1268,14 @@ def _build_segment_sheet(
             ws.cell(row=row, column=2, value=int(s.get("mention_count") or 0))
             rate = ws.cell(row=row, column=3, value=float(s.get("mention_rate") or 0) / 100.0)
             rate.number_format = "0.0%"
-            ws.cell(row=row, column=4, value=s.get("sample_status") or "")
-            for c in range(1, 5):
+            for c in range(1, 4):
                 ws.cell(row=row, column=c).border = _THIN
                 ws.cell(row=row, column=c).font = _BODY_FONT
             row += 1
         row += 1
 
     row = _write_decision_section_title(ws, row, "B. 人群差异【评论数据事实】")
-    headers_b = ["指标", "人群A", "人群B", "A提及率", "B提及率", "差异pp", "检验", "备注"]
+    headers_b = ["指标", "人群A", "人群B", "A提及率", "B提及率", "差异pp", "n_A", "n_B"]
     for c, h in enumerate(headers_b, start=1):
         ws.cell(row=row, column=c, value=h)
     _style_header_row(ws, row, 1, 8)
@@ -1295,14 +1295,8 @@ def _build_segment_sheet(
             ra.number_format = "0.0%"
             rb.number_format = "0.0%"
             ws.cell(row=row, column=6, value=float(c.get("pp_diff") or 0))
-            method = c.get("test_method") or ""
-            p = c.get("p_value")
-            oratio = (c.get("effect_size") or {}).get("odds_ratio")
-            test_txt = f"{method} p={p}" if p is not None else f"{method} n/a"
-            if oratio is not None:
-                test_txt += f" OR={oratio}"
-            ws.cell(row=row, column=7, value=test_txt)
-            ws.cell(row=row, column=8, value=c.get("note") or c.get("sample_status") or "")
+            ws.cell(row=row, column=7, value=int(c.get("n_a") or 0))
+            ws.cell(row=row, column=8, value=int(c.get("n_b") or 0))
             for col in range(1, 9):
                 ws.cell(row=row, column=col).border = _THIN
                 ws.cell(row=row, column=col).font = _BODY_FONT

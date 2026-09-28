@@ -21,12 +21,12 @@ from lib.constants import (
 )
 from lib.excel_io import _bar_data_label, write_analysis_workbook
 from lib.intelligence_codec import (
-    build_intelligence_hash_payload,
-    compute_input_hash,
+    compute_intelligence_input_hash,
     enrich_intelligence,
     parse_intelligence_output,
     validate_intelligence_payload,
 )
+from lib.constants import INTELLIGENCE_SCHEMA_VERSION
 from lib.normalize_codec import build_normalize_input_rows, validate_normalize_mappings
 from lib.statistics import aggregate_statistics, pick_representative_feedback
 from lib.io_util import skill_root
@@ -223,46 +223,20 @@ def test_8_step1_workdir_safety() -> None:
 
 
 def test_9_summary_hash_invalidation() -> None:
-    summary_a = [
-        {
-            "item_type": "用户满意",
-            "dimension": "易清洗",
-            "mention_count": 2,
-            "mention_rate": 20.0,
-            "representative_feedback": "a",
-        }
-    ]
-    summary_b = [
-        {
-            "item_type": "用户满意",
-            "dimension": "易清洗",
-            "mention_count": 5,
-            "mention_rate": 50.0,
-            "representative_feedback": "a",
-        }
-    ]
-    items = [
-        {
-            "item_type": "用户满意",
-            "merged_dimension": "易清洗",
-            "signal_type": "满意点",
-            "review_row": 1,
-        }
-    ]
-    h1 = compute_input_hash(
-        build_intelligence_hash_payload(
-            analyzed_reviews=10, summary_rows=summary_a, items=items
-        )
+    h1 = compute_intelligence_input_hash(
+        system_prompt="SYS",
+        user_prompt="USER with stats A",
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
     )
-    h2 = compute_input_hash(
-        build_intelligence_hash_payload(
-            analyzed_reviews=10, summary_rows=summary_b, items=items
-        )
+    h2 = compute_intelligence_input_hash(
+        system_prompt="SYS",
+        user_prompt="USER with stats B",
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
     )
-    h1b = compute_input_hash(
-        build_intelligence_hash_payload(
-            analyzed_reviews=10, summary_rows=summary_a, items=items
-        )
+    h1b = compute_intelligence_input_hash(
+        system_prompt="SYS",
+        user_prompt="USER with stats A",
+        schema_version=INTELLIGENCE_SCHEMA_VERSION,
     )
     assert h1 == h1b
     assert h1 != h2
