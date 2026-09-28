@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from itertools import combinations
 
 from .constants import (
     LABEL_OTHER,
-    SEGMENT_COMBO_TOP_N,
     SEGMENT_RELATED_TOP_N,
     SEGMENT_RELATED_TYPES,
     SEGMENT_TOP_N,
@@ -86,71 +84,6 @@ def build_core_segments(
     return rows
 
 
-def build_segment_combinations(
-    items: list[dict],
-    core_segments: list[dict],
-    *,
-    top_n: int = SEGMENT_COMBO_TOP_N,
-) -> dict[str, list[str]]:
-    """
-    Unordered co-occurrence pairs among 消费人群 tags in the same review_row.
-    Labels are globally deduped as \"A + B（N条）\" (sorted names), attached to
-    each involved core segment.
-    """
-    core_names = [str(s.get("segment") or "") for s in (core_segments or []) if s.get("segment")]
-    if not core_names:
-        return {}
-    core_set = set(core_names)
-
-    by_review: dict[int, set[str]] = defaultdict(set)
-    for it in items or []:
-        if _type(it) != SEGMENT_TYPE:
-            continue
-        dim = _dim(it)
-        if not dim or dim == LABEL_OTHER:
-            continue
-        rid = _rid(it)
-        if rid <= 0:
-            continue
-        by_review[rid].add(dim)
-
-    pair_counts: dict[tuple[str, str], int] = defaultdict(int)
-    for dims in by_review.values():
-        if len(dims) < 2:
-            continue
-        for a, b in combinations(sorted(dims), 2):
-            pair_counts[(a, b)] += 1
-
-    out: dict[str, list[str]] = {name: [] for name in core_names}
-    scored_by_seg: dict[str, list[tuple[int, str]]] = {name: [] for name in core_names}
-    for (a, b), cnt in pair_counts.items():
-        if cnt <= 0:
-            continue
-        # Only keep pairs that touch at least one core segment
-        if a not in core_set and b not in core_set:
-            continue
-        label = f"{a} + {b}（{cnt}条）"
-        for name in (a, b):
-            if name in scored_by_seg:
-                scored_by_seg[name].append((cnt, label))
-
-    for name in core_names:
-        scored = scored_by_seg[name]
-        scored.sort(key=lambda x: (-x[0], x[1]))
-        # Dedup labels within a segment (same unordered pair appears once)
-        seen: set[str] = set()
-        labels: list[str] = []
-        for _, lab in scored:
-            if lab in seen:
-                continue
-            seen.add(lab)
-            labels.append(lab)
-            if len(labels) >= max(0, int(top_n or 0)):
-                break
-        out[name] = labels
-    return out
-
-
 def build_segment_related_dims(
     items: list[dict],
     core_segments: list[dict],
@@ -222,11 +155,9 @@ def build_segment_stats_payload(
 ) -> dict:
     """Full Python input package for the segment-insight AI prompt."""
     core = build_core_segments(items, analyzed_reviews, top_n=top_n)
-    combos = build_segment_combinations(items, core)
     related = build_segment_related_dims(items, core)
     for row in core:
         name = row["segment"]
-        row["combination_personas"] = combos.get(name) or []
         row["related_dimensions"] = related.get(name) or {}
     return {
         "analyzed_reviews": int(analyzed_reviews or 0),
@@ -247,15 +178,12 @@ def format_segment_stats_block(payload: dict) -> str:
         lines.append("（未识别到消费人群；可不做外部研究，segments 置空）")
         return "\n".join(lines)
 
-    lines.append("## 01 核心购买人群（Python 已算好，禁止改数字）")
+    lines.append("## 01 核心消费人群（Python 已算好，禁止改数字）")
     for row in core:
-        combos = row.get("combination_personas") or []
-        combo_txt = "；".join(combos) if combos else "（无共现组合）"
         lines.append(
             f"- 排名{row.get('rank')}｜{row.get('segment')}｜"
             f"评论数={row.get('review_count')}｜"
-            f"覆盖率={float(row.get('coverage_rate') or 0):.1f}%｜"
-            f"高频组合={combo_txt}"
+            f"覆盖率={float(row.get('coverage_rate') or 0):.1f}%"
         )
     lines.append("")
     lines.append("## 每人关联的 Review 标准维度（同评共现，仅可引用下列维度）")

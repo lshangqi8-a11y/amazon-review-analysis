@@ -1118,7 +1118,7 @@ def _build_segment_insight_sheet(
         if isinstance(s, dict) and str(s.get("segment") or "").strip()
     }
 
-    for idx, width in enumerate([16, 14, 10, 12, 8, 42], start=1):
+    for idx, width in enumerate([16, 14, 10, 12, 8], start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
 
     row = 1
@@ -1126,10 +1126,10 @@ def _build_segment_insight_sheet(
     h1.font = _SECTION_FONT
     h1.fill = _SECTION_FILL
     row = 2
-    headers = ["人群", "角色", "评论数", "评论覆盖率", "排名", "高频组合画像"]
+    headers = ["人群", "角色", "评论数", "评论覆盖率", "排名"]
     for c, name in enumerate(headers, start=1):
         ws.cell(row=row, column=c, value=name)
-    _style_header_row(ws, row, 1, 6)
+    _style_header_row(ws, row, 1, 5)
     row = 3
     core = list(core_segments or [])
     if not core:
@@ -1149,14 +1149,7 @@ def _build_segment_insight_sheet(
             )
             rate_cell.number_format = EXCEL_PERCENT_FORMAT
             ws.cell(row=row, column=5, value=int(item.get("rank") or 0))
-            combos = item.get("combination_personas") or []
-            combo_cell = ws.cell(
-                row=row,
-                column=6,
-                value="；".join(str(x) for x in combos) if combos else "（无共现组合）",
-            )
-            combo_cell.alignment = Alignment(wrap_text=True, vertical="top")
-            for c in range(1, 7):
+            for c in range(1, 6):
                 ws.cell(row=row, column=c).font = _BODY_FONT
                 ws.cell(row=row, column=c).border = _THIN
             row += 1

@@ -25,7 +25,6 @@ from lib.segment_insight_codec import (
 )
 from lib.segment_stats import (
     build_core_segments,
-    build_segment_combinations,
     build_segment_stats_payload,
 )
 from lib.statistics import aggregate_statistics
@@ -151,18 +150,6 @@ def test_no_segments_ok() -> None:
     ) is None
 
 
-def test_combination_unordered_dedup_with_count() -> None:
-    core = build_core_segments(_sample_items(), analyzed_reviews=10, top_n=5)
-    combos = build_segment_combinations(_sample_items(), core)
-    # Unordered sorted label with count
-    label = "小型犬 + 幼犬（1条）"
-    assert label in (combos.get("幼犬") or [])
-    assert label in (combos.get("小型犬") or [])
-    flat = "｜".join("｜".join(v) for v in combos.values())
-    assert "幼犬 + 小型犬" not in flat  # must not use name-first ordering duplicate
-    assert "幼犬 + 学生党" not in flat
-
-
 def test_ai_rejects_unknown_segment() -> None:
     bad = _valid_insight(["外星用户"], status="unavailable")
     err = validate_segment_insight_payload(bad, allowed_segments=["幼犬"])
@@ -206,9 +193,6 @@ def test_excel_sheets_and_rates() -> None:
 
     insight = _valid_insight(["幼犬", "小型犬"], status="unavailable")
     core = build_core_segments(_sample_items(), analyzed_reviews=10, top_n=5)
-    combos = build_segment_combinations(_sample_items(), core)
-    for row in core:
-        row["combination_personas"] = combos.get(row["segment"]) or []
 
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
@@ -269,6 +253,9 @@ def test_excel_sheets_and_rates() -> None:
         assert "行为特征" not in text
         # role column present
         assert seg.cell(row=2, column=2).value == "角色"
+        assert "高频组合" not in "\n".join(
+            str(seg.cell(row=2, column=c).value or "") for c in range(1, 8)
+        )
         wb2.close()
 
 

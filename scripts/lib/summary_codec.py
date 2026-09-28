@@ -36,7 +36,7 @@ def build_stats_block(summary_rows: list[dict], *, top_n: int = 8) -> str:
 
 
 def format_section_cell_text(title: str, bullets: list | None) -> str:
-    """One copyable module cell for the AI总结 sheet."""
+    """One module text block (title + bullets)."""
     t = str(title or "").strip()
     lines: list[str] = [f"{t}总结"]
     if not isinstance(bullets, list) or not bullets:
@@ -52,7 +52,7 @@ def format_section_cell_text(title: str, bullets: list | None) -> str:
 
 
 def format_summary_sections(payload: dict) -> list[dict]:
-    """Ordered [{title, cell_text}] for AI总结 sheet (八维)."""
+    """Ordered [{title, cell_text}] for eight dims (helper; overview uses format_summary_text)."""
     sections = payload.get("sections") if isinstance(payload, dict) else None
     if not isinstance(sections, list):
         return []

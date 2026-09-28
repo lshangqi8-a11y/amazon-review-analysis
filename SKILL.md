@@ -3,7 +3,7 @@ name: amazon-review-analysis-v6
 description: >-
   Amazon review analysis V6: V4 8-dim dual-pass + AI normalize + overview summary,
   plus consumer segment insight (who buys / persona / product direction) with
-  optional web research. Excel percentages + copyable AI summary sheet.
+  optional web research. Excel composition charts + coverage audit sheet.
   No product name/category required.
   Use for 评论分析 V6 / 八维 / 维度归一 / 消费人群洞察 / AI总结.
 ---
@@ -37,9 +37,9 @@ description: >-
 
 只回答：谁在买？这些人是什么样的人？产品应该怎么做？
 
-1. **核心购买人群**（Python）：Top 5（不足则全出），评论数 / 评论覆盖率 / 高频组合画像  
-2. **核心人群画像洞察**（AI）：评论中表现 + 行为/性格/习惯/需求 + 外部来源  
-3. **产品开发方向**（AI）：必须具备的功能点 + 应建立的产品壁垒  
+1. **核心消费人群**（Python + AI role）：Top 5（不足则全出），人群 / 角色 / 评论数 / 评论覆盖率 / 排名  
+2. **核心人群画像**（AI）：评论发现 + AI联网画像 + 核心需求 + 来源  
+3. **产品开发方向**（AI）：结构化产品要求 + 产品壁垒  
 
 ### 联网研究（硬要求）
 
@@ -60,7 +60,7 @@ unique reviews / analyzed_reviews × 100%
 
 ## Excel 结构
 
-1. 评论分析总览 — 左图（模块内部构成占比）右文（AI总结，可局部复制）
+1. 评论分析总览 — 左图（模块内部构成占比）右文（Overview AI总结，可局部复制）
 2. 消费人群洞察 — 核心消费人群 / 核心人群画像 / 产品开发方向
 3. 评论分析结果 — 评论覆盖率审计（unique / analyzed_reviews）
 
