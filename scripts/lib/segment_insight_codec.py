@@ -31,8 +31,10 @@ def _as_sources(value, *, field: str) -> tuple[list[dict] | None, str | None]:
         title = str(item.get("source_title") or "").strip()
         url = str(item.get("source_url") or "").strip()
         finding = str(item.get("finding") or "").strip()
-        if not title or not finding:
-            return None, f"{field}[{i}] 需要 source_title 与 finding"
+        if not title or not url or not finding:
+            return None, (
+                f"{field}[{i}] 需要非空的 source_title / source_url / finding"
+            )
         out.append(
             {
                 "source_title": title,
@@ -59,7 +61,14 @@ def validate_segment_insight_payload(
     if not isinstance(segments, list):
         return "segments 必须是数组"
 
-    allowed = {str(s).strip() for s in (allowed_segments or []) if str(s).strip()}
+    # When allowed_segments is provided (incl. []), every segment must be in it.
+    # allowed_segments=[] ⇒ segments must be empty.
+    enforce_allowlist = allowed_segments is not None
+    allowed = (
+        {str(s).strip() for s in allowed_segments if str(s).strip()}
+        if enforce_allowlist
+        else None
+    )
     seen: set[str] = set()
     for i, seg in enumerate(segments):
         if not isinstance(seg, dict):
@@ -67,7 +76,7 @@ def validate_segment_insight_payload(
         name = str(seg.get("segment") or "").strip()
         if not name:
             return f"segments[{i}].segment 不能为空"
-        if allowed and name not in allowed:
+        if enforce_allowlist and name not in allowed:
             return f"segments[{i}].segment 不在核心人群列表：{name}"
         if name in seen:
             return f"重复人群：{name}"
@@ -92,8 +101,8 @@ def validate_segment_insight_payload(
 
         if status == "ok" and not sources:
             return f"external_research_status=ok 时 segments[{i}].sources 不能为空"
-        if status == "unavailable" and sources:
-            return "external_research_status=unavailable 时不得填写 sources"
+        if status in ("skipped", "unavailable") and sources:
+            return f"external_research_status={status} 时不得填写 sources"
 
     pd = payload.get("product_development")
     if not isinstance(pd, dict):

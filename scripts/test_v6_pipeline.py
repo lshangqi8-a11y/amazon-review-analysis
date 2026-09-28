@@ -190,6 +190,17 @@ def test_external_sources_and_offline_degrade() -> None:
     }
     assert validate_segment_insight_payload(ok, allowed_segments=["幼犬"]) is None
 
+    # status=ok requires non-empty source_url
+    missing_url = json.loads(json.dumps(ok))
+    missing_url["segments"][0]["sources"][0]["source_url"] = "  "
+    err_url = validate_segment_insight_payload(missing_url, allowed_segments=["幼犬"])
+    assert err_url and "source_url" in err_url
+
+    missing_title = json.loads(json.dumps(ok))
+    missing_title["segments"][0]["sources"][0]["source_title"] = ""
+    err_title = validate_segment_insight_payload(missing_title, allowed_segments=["幼犬"])
+    assert err_title and "source_title" in err_title
+
     offline = json.loads(json.dumps(ok))
     offline["external_research_status"] = "unavailable"
     offline["segments"][0]["sources"] = []
@@ -201,6 +212,11 @@ def test_external_sources_and_offline_degrade() -> None:
     err = validate_segment_insight_payload(forged, allowed_segments=["幼犬"])
     assert err and "不得填写 sources" in err
 
+    skipped_with_src = json.loads(json.dumps(ok))
+    skipped_with_src["external_research_status"] = "skipped"
+    err_skip = validate_segment_insight_payload(skipped_with_src, allowed_segments=["幼犬"])
+    assert err_skip and "不得填写 sources" in err_skip
+
     text, err2 = parse_segment_insight_output(
         json.dumps(offline, ensure_ascii=False),
         allowed_segments=["幼犬"],
@@ -208,6 +224,33 @@ def test_external_sources_and_offline_degrade() -> None:
     assert err2 is None and text is not None
     digest = format_segment_insight_digest(text)
     assert "消费人群洞察总结" in digest
+
+
+def test_empty_allowed_segments_rejects_invented() -> None:
+    invented = {
+        "external_research_status": "unavailable",
+        "segments": [
+            {
+                "segment": "AI自造人群",
+                "review_observations": ["x"],
+                "behavior_traits": ["x"],
+                "personality_traits": ["x"],
+                "usage_habits": ["x"],
+                "core_needs": ["x"],
+                "sources": [],
+            }
+        ],
+        "product_development": {"must_have_features": [], "product_moats": []},
+    }
+    err = validate_segment_insight_payload(invented, allowed_segments=[])
+    assert err and "不在核心人群" in err
+
+    empty_ok = {
+        "external_research_status": "skipped",
+        "segments": [],
+        "product_development": {"must_have_features": [], "product_moats": []},
+    }
+    assert validate_segment_insight_payload(empty_ok, allowed_segments=[]) is None
 
 
 def test_excel_percent_and_ai_summary_cells() -> None:

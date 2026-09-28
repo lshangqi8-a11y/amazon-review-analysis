@@ -14,13 +14,14 @@
 
 【联网研究】
 - 只要识别出了核心消费人群，且当前环境可联网：必须主动检索公开资料，理解行为/性格/使用习惯/核心需求
-- 每人至少写入 1 条 sources（source_title / source_url / finding）
+- 每人至少写入 1 条 sources；每条必须同时有非空 source_title / source_url / finding
 - external_research_status = "ok"
 - 若无可解释的人群差异或不值得外研：status="skipped"，sources=[]
 - 若环境无联网：status="unavailable"，sources=[]，不得伪造来源，且不得中断
 
 【产品开发方向】
 只输出两类（不要做成 V5 式产品决策分析）：
+- 结合用户提示中的产品名称/类目（可为空「未提供」）明确产品对象；不得因此中断
 - must_have_features：满足核心人群至少应具备的功能点（按当前评论自适应，禁止固定词典）
 - product_moats：应重点做到比普通竞品更强的壁垒方向（不是普通功能罗列）
 

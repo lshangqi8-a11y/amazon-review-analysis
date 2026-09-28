@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 V6 Step 6b: prepare one-shot consumer segment insight AI batch.
-Depends on AI-normalized extract_items.json. No product name/category.
+Depends on AI-normalized extract_items.json.
+Product name/category from meta are injected only into this module's prompt.
 """
 from __future__ import annotations
 
@@ -24,6 +25,13 @@ from lib.segment_stats import (
     build_segment_stats_payload,
     format_segment_stats_block,
 )
+
+
+def _product_context(meta: dict) -> tuple[str, str]:
+    """Display product fields for segment insight only; empty → 未提供."""
+    name = str((meta or {}).get("product_name") or "").strip() or "未提供"
+    category = str((meta or {}).get("product_category") or "").strip() or "未提供"
+    return name, category
 
 
 def _load_normalized_items(workdir: Path) -> list[dict]:
@@ -58,6 +66,7 @@ def main() -> int:
     meta = read_json(workdir / "meta.json")
     items = _load_normalized_items(workdir)
     analyzed = analyzed_review_count(meta, fallback_total=int(meta.get("total_reviews") or 0))
+    product_name, product_category = _product_context(meta)
 
     stats = build_segment_stats_payload(items, analyzed, top_n=max(0, int(args.top_n)))
     write_json(workdir / "segment_stats.json", stats)
@@ -81,6 +90,8 @@ def main() -> int:
     user_msg = render_template(
         user_tpl,
         {
+            "product_name": product_name,
+            "product_category": product_category,
             "stats_block": stats_block,
             "network_capability": net_hint,
         },
@@ -97,6 +108,8 @@ def main() -> int:
             "segment_count": int(stats.get("segment_count") or 0),
             "top_n": int(args.top_n),
             "allowed_segments": [s.get("segment") for s in (stats.get("core_segments") or [])],
+            "product_name": product_name,
+            "product_category": product_category,
             "network_capability": net,
         },
     )
