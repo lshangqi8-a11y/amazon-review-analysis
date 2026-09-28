@@ -16,7 +16,6 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from .constants import (
-    AI_SUMMARY_SHEET_NAME,
     ANALYSIS_SHEET_NAMES,
     CONTEXT_SECTION_DESC,
     EXCEL_PERCENT_FORMAT,
@@ -33,7 +32,6 @@ from .constants import (
     SEGMENT_INSIGHT_SHEET_NAME,
     SEGMENT_RELATED_TYPES,
     TYPE_DISPLAY_LABELS,
-    VOC_TYPES,
 )
 from .statistics import build_theme_insight_summary
 TITLE_HEADER_CANDIDATES = [
@@ -349,9 +347,9 @@ def _rate_count_label(item: dict, total_reviews: int = 0) -> str:
     return f"{rate:.2f}%（{count}）"
 
 
-def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
-    """Compact on-bar label: just the percentage (7%)."""
-    rate = float(item.get("mention_rate") or 0)
+def _bar_share_label(share_pct: float) -> str:
+    """Compact on-bar label for module-internal share (e.g. 83.3%)."""
+    rate = float(share_pct or 0)
     if abs(rate - round(rate)) < 0.05:
         rate_txt = f"{rate:.0f}"
     else:
@@ -359,7 +357,18 @@ def _bar_data_label(item: dict, total_reviews: int = 0) -> str:
     return f"{rate_txt}%"
 
 
-# Dashboard: left charts/panels (A–N), right AI summary column (O–U)
+def _module_composition_shares(top_rows: list[dict]) -> list[float]:
+    """
+    Module-internal composition fractions that sum to ~1.0.
+    share = mention_count / sum(mention_count of displayed dims).
+    """
+    counts = [max(0, int(r.get("mention_count") or 0)) for r in top_rows]
+    denom = sum(counts)
+    if denom <= 0:
+        return [0.0 for _ in top_rows]
+    return [c / denom for c in counts]
+
+
 PORTRAIT_TYPES = list(OVERVIEW_CHART_TYPES)
 _CARD_ROW_HEIGHT = 18
 _CHART_WIDTH = 10.5
@@ -416,7 +425,6 @@ def _ensure_analysis_sheets_at_end(wb, original_sheet_order: list[str]) -> None:
         for n in (
             OVERVIEW_SHEET_NAME,
             SEGMENT_INSIGHT_SHEET_NAME,
-            AI_SUMMARY_SHEET_NAME,
             RESULT_SHEET_NAME,
         )
         if n in wb.sheetnames
@@ -609,7 +617,8 @@ def _write_portrait_module(
     hidden_header_row: int,
     total_reviews: int = 0,
 ) -> dict:
-    """Compact chart card: title only (no count / no jargon subtitle)."""
+    """Compact chart card: bars = module-internal composition share (sum ≈ 100%)."""
+    del total_reviews  # charts no longer use coverage / analyzed_reviews
     top_n = _overview_limit_for_type(item_type)
     display = type_display_label(item_type)
     card_end_row = card_row + _CARD_ROW_HEIGHT - 1
@@ -632,7 +641,6 @@ def _write_portrait_module(
         top_n,
         min_mentions=OVERVIEW_MIN_MENTIONS,
     )
-    total = int(total_reviews or 0)
 
     if not top_rows:
         msg_row = card_row + (_CARD_ROW_HEIGHT // 2)
@@ -652,23 +660,22 @@ def _write_portrait_module(
             "has_chart": False,
             "chart_title": None,
             "label_payload": None,
+            "composition_sum": 0.0,
         }
 
+    shares = _module_composition_shares(top_rows)
     ws.cell(row=hidden_header_row, column=hidden_cat_col, value="维度")
-    ws.cell(row=hidden_header_row, column=hidden_val_col, value="提及频率")
+    ws.cell(row=hidden_header_row, column=hidden_val_col, value="构成占比")
     ws.cell(row=hidden_header_row, column=hidden_label_col, value="柱顶标签")
     label_values: list[str] = []
     for i, item in enumerate(top_rows):
         r = hidden_header_row + 1 + i
         dim = str(item.get("dimension") or "")
+        share = float(shares[i])
         ws.cell(row=r, column=hidden_cat_col, value=_truncate_label(dim, 14))
-        rate_cell = ws.cell(
-            row=r,
-            column=hidden_val_col,
-            value=float(item.get("mention_rate") or 0) / 100.0,
-        )
+        rate_cell = ws.cell(row=r, column=hidden_val_col, value=share)
         rate_cell.number_format = EXCEL_PERCENT_FORMAT
-        label = _bar_data_label(item, total)
+        label = _bar_share_label(share * 100.0)
         ws.cell(row=r, column=hidden_label_col, value=label)
         label_values.append(label)
 
@@ -676,7 +683,7 @@ def _write_portrait_module(
     data_end = hidden_header_row + len(top_rows)
     chart_title = display
     anchor = f"{get_column_letter(card_col_start)}{card_row + 1}"
-    y_max = max(float(item.get("mention_rate") or 0) / 100.0 for item in top_rows)
+    y_max = max(shares) if shares else 0.0
     _add_portrait_column_chart(
         ws,
         title=chart_title,
@@ -698,6 +705,7 @@ def _write_portrait_module(
         "has_chart": True,
         "chart_title": chart_title,
         "label_payload": {"formula": formula, "values": label_values},
+        "composition_sum": round(sum(shares), 6),
     }
 
 
@@ -1087,58 +1095,6 @@ def _build_result_sheet(wb, summary_rows: list[dict]) -> None:
     ws.row_dimensions[1].height = 22
 
 
-def _write_plain_text_cell(ws, row: int, col: int, value: str, *, font: Font | None = None) -> None:
-    cell = ws.cell(row=row, column=col, value=value)
-    cell.font = font or _BODY_FONT
-    cell.alignment = Alignment(wrap_text=True, vertical="top")
-    cell.border = _THIN
-
-
-def _build_ai_summary_sheet(
-    wb,
-    *,
-    summary_sections: list[dict] | None = None,
-    segment_insight_digest: str = "",
-) -> dict:
-    """
-    Dedicated copy-friendly sheet: one unmerged cell per module.
-    A1 title; A2–A9 eight dims; A11 segment insight digest.
-    """
-    if AI_SUMMARY_SHEET_NAME in wb.sheetnames:
-        del wb[AI_SUMMARY_SHEET_NAME]
-    ws = wb.create_sheet(AI_SUMMARY_SHEET_NAME)
-    ws.column_dimensions["A"].width = 88
-
-    title = ws.cell(row=1, column=1, value="AI评论洞察总结")
-    title.font = _TITLE_FONT
-    title.alignment = Alignment(vertical="center")
-    ws.row_dimensions[1].height = 28
-
-    by_title = {
-        str(s.get("title") or ""): str(s.get("cell_text") or "")
-        for s in (summary_sections or [])
-        if isinstance(s, dict)
-    }
-    for idx, dim in enumerate(VOC_TYPES):
-        row = 2 + idx  # A2..A9
-        text = by_title.get(dim) or f"{dim}总结\n· 证据不足，从略"
-        _write_plain_text_cell(ws, row, 1, text)
-        ws.row_dimensions[row].height = max(48, 16 + 14 * text.count("\n"))
-
-    digest = (segment_insight_digest or "").strip() or "消费人群洞察总结\n· 尚未生成"
-    _write_plain_text_cell(ws, 11, 1, digest)
-    ws.row_dimensions[11].height = max(72, 16 + 14 * digest.count("\n"))
-
-    # Ensure no merged ranges on body cells (title may also stay unmerged).
-    assert not ws.merged_cells.ranges
-    return {
-        "sheet": AI_SUMMARY_SHEET_NAME,
-        "section_rows": list(range(2, 10)),
-        "segment_digest_row": 11,
-        "merged_body_cells": False,
-    }
-
-
 def _join_lines(values: list | None, *, empty: str = "（暂无）") -> str:
     parts = [str(v).strip() for v in (values or []) if str(v or "").strip()]
     return "\n".join(f"· {p}" for p in parts) if parts else empty
@@ -1154,18 +1110,26 @@ def _build_segment_insight_sheet(
         del wb[SEGMENT_INSIGHT_SHEET_NAME]
     ws = wb.create_sheet(SEGMENT_INSIGHT_SHEET_NAME)
 
-    for idx, width in enumerate([18, 12, 12, 8, 40, 36], start=1):
+    payload = insight_payload if isinstance(insight_payload, dict) else {}
+    segments = payload.get("segments") if isinstance(payload.get("segments"), list) else []
+    role_by_name = {
+        str(s.get("segment") or "").strip(): str(s.get("role") or "").strip()
+        for s in segments
+        if isinstance(s, dict) and str(s.get("segment") or "").strip()
+    }
+
+    for idx, width in enumerate([16, 14, 10, 12, 8, 42], start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
 
     row = 1
-    h1 = ws.cell(row=row, column=1, value="01 核心购买人群")
+    h1 = ws.cell(row=row, column=1, value="01 核心消费人群")
     h1.font = _SECTION_FONT
     h1.fill = _SECTION_FILL
     row = 2
-    headers = ["人群", "评论数", "评论覆盖率", "排名", "高频组合画像"]
+    headers = ["人群", "角色", "评论数", "评论覆盖率", "排名", "高频组合画像"]
     for c, name in enumerate(headers, start=1):
         ws.cell(row=row, column=c, value=name)
-    _style_header_row(ws, row, 1, 5)
+    _style_header_row(ws, row, 1, 6)
     row = 3
     core = list(core_segments or [])
     if not core:
@@ -1174,55 +1138,47 @@ def _build_segment_insight_sheet(
         row += 1
     else:
         for item in core:
-            ws.cell(row=row, column=1, value=str(item.get("segment") or ""))
-            ws.cell(row=row, column=2, value=int(item.get("review_count") or 0))
+            name = str(item.get("segment") or "")
+            ws.cell(row=row, column=1, value=name)
+            ws.cell(row=row, column=2, value=role_by_name.get(name) or "（待AI判定）")
+            ws.cell(row=row, column=3, value=int(item.get("review_count") or 0))
             rate_cell = ws.cell(
                 row=row,
-                column=3,
+                column=4,
                 value=float(item.get("coverage_rate") or 0) / 100.0,
             )
             rate_cell.number_format = EXCEL_PERCENT_FORMAT
-            ws.cell(row=row, column=4, value=int(item.get("rank") or 0))
+            ws.cell(row=row, column=5, value=int(item.get("rank") or 0))
             combos = item.get("combination_personas") or []
             combo_cell = ws.cell(
                 row=row,
-                column=5,
+                column=6,
                 value="；".join(str(x) for x in combos) if combos else "（无共现组合）",
             )
             combo_cell.alignment = Alignment(wrap_text=True, vertical="top")
-            for c in range(1, 6):
+            for c in range(1, 7):
                 ws.cell(row=row, column=c).font = _BODY_FONT
                 ws.cell(row=row, column=c).border = _THIN
             row += 1
 
     row += 1
-    h2 = ws.cell(row=row, column=1, value="02 核心人群画像洞察")
+    h2 = ws.cell(row=row, column=1, value="02 核心人群画像")
     h2.font = _SECTION_FONT
     h2.fill = _SECTION_FILL
     row += 1
-    portrait_headers = [
-        "人群名称",
-        "评论中表现",
-        "行为特征",
-        "性格特征",
-        "使用习惯",
-        "核心需求",
-        "来源",
-    ]
+    portrait_headers = ["人群", "评论发现", "AI联网画像", "核心需求", "来源"]
     for c, name in enumerate(portrait_headers, start=1):
         ws.cell(row=row, column=c, value=name)
-    _style_header_row(ws, row, 1, 7)
-    for idx, width in enumerate([16, 28, 22, 22, 22, 22, 36], start=1):
+    _style_header_row(ws, row, 1, 5)
+    for idx, width in enumerate([14, 32, 36, 28, 40], start=1):
         ws.column_dimensions[get_column_letter(idx)].width = max(
             ws.column_dimensions[get_column_letter(idx)].width or 10,
             width,
         )
     row += 1
 
-    payload = insight_payload if isinstance(insight_payload, dict) else {}
-    segments = payload.get("segments") if isinstance(payload.get("segments"), list) else []
     if not segments:
-        cell = ws.cell(row=row, column=1, value="（暂无人群画像洞察）")
+        cell = ws.cell(row=row, column=1, value="（暂无人群画像）")
         cell.font = _EMPTY_FONT
         row += 1
     else:
@@ -1238,10 +1194,8 @@ def _build_segment_insight_sheet(
             ) or "（无外部来源）"
             values = [
                 str(seg.get("segment") or ""),
-                _join_lines(seg.get("review_observations")),
-                _join_lines(seg.get("behavior_traits")),
-                _join_lines(seg.get("personality_traits")),
-                _join_lines(seg.get("usage_habits")),
+                _join_lines(seg.get("review_findings")),
+                _join_lines(seg.get("ai_profile")),
                 _join_lines(seg.get("core_needs")),
                 source_txt,
             ]
@@ -1250,7 +1204,7 @@ def _build_segment_insight_sheet(
                 cell.font = _BODY_FONT
                 cell.border = _THIN
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
-            ws.row_dimensions[row].height = 72
+            ws.row_dimensions[row].height = 80
             row += 1
 
     row += 1
@@ -1259,21 +1213,62 @@ def _build_segment_insight_sheet(
     h3.fill = _SECTION_FILL
     row += 1
     pd = payload.get("product_development") if isinstance(payload.get("product_development"), dict) else {}
-    ws.cell(row=row, column=1, value="必须具备的功能点").font = _HEADER_FONT
+
+    ws.cell(row=row, column=1, value="产品要求").font = _HEADER_FONT
     row += 1
-    feat_cell = ws.cell(row=row, column=1, value=_join_lines(pd.get("must_have_features")))
-    feat_cell.font = _BODY_FONT
-    feat_cell.alignment = Alignment(wrap_text=True, vertical="top")
-    feat_cell.border = _THIN
-    ws.row_dimensions[row].height = 60
-    row += 2
-    ws.cell(row=row, column=1, value="应建立的产品壁垒").font = _HEADER_FONT
+    req_headers = ["产品要求", "对应核心人群", "依据"]
+    for c, name in enumerate(req_headers, start=1):
+        ws.cell(row=row, column=c, value=name)
+    _style_header_row(ws, row, 1, 3)
     row += 1
-    moat_cell = ws.cell(row=row, column=1, value=_join_lines(pd.get("product_moats")))
-    moat_cell.font = _BODY_FONT
-    moat_cell.alignment = Alignment(wrap_text=True, vertical="top")
-    moat_cell.border = _THIN
-    ws.row_dimensions[row].height = 60
+    requirements = pd.get("requirements") if isinstance(pd.get("requirements"), list) else []
+    if not requirements:
+        cell = ws.cell(row=row, column=1, value="（暂无产品要求）")
+        cell.font = _EMPTY_FONT
+        row += 1
+    else:
+        for req in requirements:
+            if not isinstance(req, dict):
+                continue
+            targets = req.get("target_segments") or []
+            values = [
+                str(req.get("requirement") or ""),
+                " / ".join(str(t) for t in targets),
+                str(req.get("basis") or ""),
+            ]
+            for c, val in enumerate(values, start=1):
+                cell = ws.cell(row=row, column=c, value=val)
+                cell.font = _BODY_FONT
+                cell.border = _THIN
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            ws.row_dimensions[row].height = 48
+            row += 1
+
+    row += 1
+    ws.cell(row=row, column=1, value="产品壁垒").font = _HEADER_FONT
+    row += 1
+    moat_headers = ["壁垒方向", "为什么值得做成壁垒"]
+    for c, name in enumerate(moat_headers, start=1):
+        ws.cell(row=row, column=c, value=name)
+    _style_header_row(ws, row, 1, 2)
+    row += 1
+    moats = pd.get("product_moats") if isinstance(pd.get("product_moats"), list) else []
+    if not moats:
+        cell = ws.cell(row=row, column=1, value="（暂无壁垒方向）")
+        cell.font = _EMPTY_FONT
+        row += 1
+    else:
+        for moat in moats:
+            if not isinstance(moat, dict):
+                continue
+            values = [str(moat.get("moat") or ""), str(moat.get("reason") or "")]
+            for c, val in enumerate(values, start=1):
+                cell = ws.cell(row=row, column=c, value=val)
+                cell.font = _BODY_FONT
+                cell.border = _THIN
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            ws.row_dimensions[row].height = 48
+            row += 1
 
     status = str(payload.get("external_research_status") or "")
     return {
@@ -1281,6 +1276,7 @@ def _build_segment_insight_sheet(
         "core_segment_count": len(core),
         "portrait_count": len(segments),
         "external_research_status": status,
+        "modules": ["01 核心消费人群", "02 核心人群画像", "03 产品开发方向"],
         "related_types": list(SEGMENT_RELATED_TYPES),
     }
 
@@ -1295,12 +1291,10 @@ def write_analysis_workbook(
     total_reviews: int = 0,
     voc_items: int | None = None,
     overview_summary: str = "",
-    summary_sections: list[dict] | None = None,
     core_segments: list[dict] | None = None,
     segment_insight: dict | None = None,
-    segment_insight_digest: str = "",
 ) -> dict:
-    """Keep original sheets; append overview + AI总结 + 消费人群洞察 + result."""
+    """Keep original sheets; append overview + 消费人群洞察 + result."""
     source_path = Path(source_path)
     if source_path.exists():
         wb = load_workbook(source_path)
@@ -1327,11 +1321,6 @@ def write_analysis_workbook(
         product_name=product_name or "",
         product_category=product_category or "",
     )
-    ai_meta = _build_ai_summary_sheet(
-        wb,
-        summary_sections=summary_sections,
-        segment_insight_digest=segment_insight_digest or "",
-    )
     seg_meta = _build_segment_insight_sheet(
         wb,
         core_segments=core_segments,
@@ -1354,9 +1343,7 @@ def write_analysis_workbook(
         "module_metas": overview_meta.get("module_metas") or [],
         "overview_sheet": OVERVIEW_SHEET_NAME,
         "result_sheet": RESULT_SHEET_NAME,
-        "ai_summary_sheet": AI_SUMMARY_SHEET_NAME,
         "segment_insight_sheet": SEGMENT_INSIGHT_SHEET_NAME,
-        "ai_summary_meta": ai_meta,
         "segment_insight_meta": seg_meta,
         "feedback_start": overview_meta.get("feedback_start"),
         "context_start": overview_meta.get("context_start"),

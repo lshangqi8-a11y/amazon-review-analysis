@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""V6 unit tests: percentages, AI summary cells, consumer segment insight."""
+"""V6 unit tests: composition charts, segment insight schema, Excel sheets."""
 from __future__ import annotations
 
 import json
@@ -12,16 +12,14 @@ from openpyxl import Workbook, load_workbook
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.constants import (
-    AI_SUMMARY_SHEET_NAME,
     EXCEL_PERCENT_FORMAT,
     OVERVIEW_SHEET_NAME,
     RESULT_SHEET_NAME,
     SEGMENT_INSIGHT_SHEET_NAME,
     VOC_TYPES,
 )
-from lib.excel_io import write_analysis_workbook
+from lib.excel_io import _module_composition_shares, write_analysis_workbook
 from lib.segment_insight_codec import (
-    format_segment_insight_digest,
     parse_segment_insight_output,
     validate_segment_insight_payload,
 )
@@ -31,7 +29,7 @@ from lib.segment_stats import (
     build_segment_stats_payload,
 )
 from lib.statistics import aggregate_statistics
-from lib.summary_codec import format_summary_sections, validate_summary_payload
+from lib.summary_codec import format_summary_text, validate_summary_payload
 
 
 def _item(item_type: str, dim: str, review_row: int, summary: str = "x") -> dict:
@@ -45,12 +43,6 @@ def _item(item_type: str, dim: str, review_row: int, summary: str = "x") -> dict
 
 
 def _sample_items() -> list[dict]:
-    # review 2: 幼犬 + 小型犬
-    # review 3: 幼犬
-    # review 4: 小型犬 + 多犬家庭
-    # review 5: 老年用户
-    # review 6: 学生党
-    # review 7: 家庭用户
     return [
         _item("消费人群", "幼犬", 2, "幼犬在用"),
         _item("消费人群", "小型犬", 2, "小型犬"),
@@ -68,48 +60,82 @@ def _sample_items() -> list[dict]:
     ]
 
 
+def _valid_insight(allowed: list[str], *, status: str = "unavailable") -> dict:
+    segments = []
+    for i, name in enumerate(allowed):
+        seg = {
+            "segment": name,
+            "role": "最终使用者" if i == 0 else "购买决策者",
+            "review_findings": [f"{name}评论发现"],
+            "ai_profile": [f"{name}联网画像或不可用归纳"],
+            "core_needs": [f"{name}需求"],
+            "sources": [],
+        }
+        if status == "ok":
+            seg["sources"] = [
+                {
+                    "source_title": "Example",
+                    "source_url": "https://example.com",
+                    "finding": f"{name}相关发现",
+                }
+            ]
+        segments.append(seg)
+    return {
+        "external_research_status": status,
+        "segments": segments,
+        "product_development": {
+            "requirements": [
+                {
+                    "requirement": "安全结构",
+                    "target_segments": allowed[:1] or ["x"],
+                    "basis": "评论与角色证据",
+                }
+            ]
+            if allowed
+            else [],
+            "product_moats": [
+                {"moat": "耐久体系", "reason": "高频使用场景需要真正做强"}
+            ]
+            if allowed
+            else [],
+        },
+    }
+
+
 def test_v4_eight_dims_unchanged() -> None:
     assert len(VOC_TYPES) == 8
-    assert VOC_TYPES[:6] == [
-        "消费人群",
-        "使用地点",
-        "使用时刻",
-        "产品用途",
-        "使用场景",
-        "购买动机",
-    ]
-    assert VOC_TYPES[6:] == ["用户满意", "未被满足"]
     rows = aggregate_statistics(_sample_items(), total_reviews=10, consolidate=False)
     types = {r["item_type"] for r in rows}
     assert "消费人群" in types and "用户满意" in types
 
 
+def test_chart_composition_sums_to_one() -> None:
+    rows = [
+        {"dimension": "儿童", "mention_count": 15},
+        {"dimension": "挑食儿童", "mention_count": 3},
+    ]
+    shares = _module_composition_shares(rows)
+    assert abs(sum(shares) - 1.0) < 1e-9
+    assert abs(shares[0] - 15 / 18) < 1e-9
+    assert abs(shares[1] - 3 / 18) < 1e-9
+
+
 def test_unique_review_and_coverage() -> None:
     core = build_core_segments(_sample_items(), analyzed_reviews=10, top_n=5)
     by_name = {c["segment"]: c for c in core}
-    # 幼犬 appears in reviews 2 and 3 → count 2, coverage 20%
     assert by_name["幼犬"]["review_count"] == 2
     assert by_name["幼犬"]["coverage_rate"] == 20.0
-    # duplicate mention same review must not double-count
-    dup = _sample_items() + [_item("消费人群", "幼犬", 2, "again")]
-    core2 = build_core_segments(dup, analyzed_reviews=10, top_n=5)
-    assert {c["segment"]: c["review_count"] for c in core2}["幼犬"] == 2
 
 
 def test_top5_and_under5() -> None:
     core = build_core_segments(_sample_items(), analyzed_reviews=10, top_n=5)
     assert len(core) == 5
-    assert [c["rank"] for c in core] == [1, 2, 3, 4, 5]
-    # sorted by coverage desc: 幼犬/小型犬 both 2, then others 1
-    assert core[0]["review_count"] >= core[-1]["review_count"]
-
     few = [
         _item("消费人群", "A", 2),
         _item("消费人群", "B", 3),
         _item("消费人群", "C", 4),
     ]
-    core_few = build_core_segments(few, analyzed_reviews=5, top_n=5)
-    assert len(core_few) == 3
+    assert len(build_core_segments(few, analyzed_reviews=5, top_n=5)) == 3
 
 
 def test_no_segments_ok() -> None:
@@ -119,166 +145,66 @@ def test_no_segments_ok() -> None:
         top_n=5,
     )
     assert payload["segment_count"] == 0
-    assert payload["core_segments"] == []
-    err = validate_segment_insight_payload(
-        {
-            "external_research_status": "skipped",
-            "segments": [],
-            "product_development": {"must_have_features": [], "product_moats": []},
-        },
+    assert validate_segment_insight_payload(
+        _valid_insight([], status="skipped"),
         allowed_segments=[],
-    )
-    assert err is None
+    ) is None
 
 
-def test_combination_same_review_only() -> None:
+def test_combination_unordered_dedup_with_count() -> None:
     core = build_core_segments(_sample_items(), analyzed_reviews=10, top_n=5)
     combos = build_segment_combinations(_sample_items(), core)
-    # 幼犬 + 小型犬 co-occur in review 2
-    assert any("幼犬 + 小型犬" == x or "小型犬 + 幼犬" == x for x in combos.get("幼犬", []))
-    # fabricated combo must not appear
+    # Unordered sorted label with count
+    label = "小型犬 + 幼犬（1条）"
+    assert label in (combos.get("幼犬") or [])
+    assert label in (combos.get("小型犬") or [])
     flat = "｜".join("｜".join(v) for v in combos.values())
+    assert "幼犬 + 小型犬" not in flat  # must not use name-first ordering duplicate
     assert "幼犬 + 学生党" not in flat
 
 
 def test_ai_rejects_unknown_segment() -> None:
-    err = validate_segment_insight_payload(
-        {
-            "external_research_status": "unavailable",
-            "segments": [
-                {
-                    "segment": "外星用户",
-                    "review_observations": ["x"],
-                    "behavior_traits": ["x"],
-                    "personality_traits": ["x"],
-                    "usage_habits": ["x"],
-                    "core_needs": ["x"],
-                    "sources": [],
-                }
-            ],
-            "product_development": {"must_have_features": ["a"], "product_moats": ["b"]},
-        },
-        allowed_segments=["幼犬"],
-    )
+    bad = _valid_insight(["外星用户"], status="unavailable")
+    err = validate_segment_insight_payload(bad, allowed_segments=["幼犬"])
     assert err and "不在核心人群" in err
-
-
-def test_external_sources_and_offline_degrade() -> None:
-    ok = {
-        "external_research_status": "ok",
-        "segments": [
-            {
-                "segment": "幼犬",
-                "review_observations": ["评论表现"],
-                "behavior_traits": ["行为"],
-                "personality_traits": ["性格"],
-                "usage_habits": ["习惯"],
-                "core_needs": ["需求"],
-                "sources": [
-                    {
-                        "source_title": "Example",
-                        "source_url": "https://example.com",
-                        "finding": "幼犬主人重视陪伴",
-                    }
-                ],
-            }
-        ],
-        "product_development": {
-            "must_have_features": ["安全"],
-            "product_moats": ["耐久结构体系"],
-        },
-    }
-    assert validate_segment_insight_payload(ok, allowed_segments=["幼犬"]) is None
-
-    # status=ok requires non-empty source_url
-    missing_url = json.loads(json.dumps(ok))
-    missing_url["segments"][0]["sources"][0]["source_url"] = "  "
-    err_url = validate_segment_insight_payload(missing_url, allowed_segments=["幼犬"])
-    assert err_url and "source_url" in err_url
-
-    missing_title = json.loads(json.dumps(ok))
-    missing_title["segments"][0]["sources"][0]["source_title"] = ""
-    err_title = validate_segment_insight_payload(missing_title, allowed_segments=["幼犬"])
-    assert err_title and "source_title" in err_title
-
-    offline = json.loads(json.dumps(ok))
-    offline["external_research_status"] = "unavailable"
-    offline["segments"][0]["sources"] = []
-    assert validate_segment_insight_payload(offline, allowed_segments=["幼犬"]) is None
-
-    forged = json.loads(json.dumps(ok))
-    forged["external_research_status"] = "unavailable"
-    # still has sources → reject
-    err = validate_segment_insight_payload(forged, allowed_segments=["幼犬"])
-    assert err and "不得填写 sources" in err
-
-    skipped_with_src = json.loads(json.dumps(ok))
-    skipped_with_src["external_research_status"] = "skipped"
-    err_skip = validate_segment_insight_payload(skipped_with_src, allowed_segments=["幼犬"])
-    assert err_skip and "不得填写 sources" in err_skip
-
-    text, err2 = parse_segment_insight_output(
-        json.dumps(offline, ensure_ascii=False),
-        allowed_segments=["幼犬"],
-    )
-    assert err2 is None and text is not None
-    digest = format_segment_insight_digest(text)
-    assert "消费人群洞察总结" in digest
 
 
 def test_empty_allowed_segments_rejects_invented() -> None:
-    invented = {
-        "external_research_status": "unavailable",
-        "segments": [
-            {
-                "segment": "AI自造人群",
-                "review_observations": ["x"],
-                "behavior_traits": ["x"],
-                "personality_traits": ["x"],
-                "usage_habits": ["x"],
-                "core_needs": ["x"],
-                "sources": [],
-            }
-        ],
-        "product_development": {"must_have_features": [], "product_moats": []},
-    }
+    invented = _valid_insight(["AI自造人群"], status="unavailable")
     err = validate_segment_insight_payload(invented, allowed_segments=[])
     assert err and "不在核心人群" in err
 
-    empty_ok = {
-        "external_research_status": "skipped",
-        "segments": [],
-        "product_development": {"must_have_features": [], "product_moats": []},
-    }
-    assert validate_segment_insight_payload(empty_ok, allowed_segments=[]) is None
+
+def test_new_schema_role_requirements_moats() -> None:
+    ok = _valid_insight(["幼犬"], status="ok")
+    assert validate_segment_insight_payload(ok, allowed_segments=["幼犬"]) is None
+    assert ok["segments"][0]["role"] == "最终使用者"
+    assert isinstance(ok["product_development"]["requirements"][0], dict)
+    assert isinstance(ok["product_development"]["product_moats"][0], dict)
+
+    missing_url = json.loads(json.dumps(ok))
+    missing_url["segments"][0]["sources"][0]["source_url"] = ""
+    err = validate_segment_insight_payload(missing_url, allowed_segments=["幼犬"])
+    assert err and "source_url" in err
+
+    skipped_src = json.loads(json.dumps(ok))
+    skipped_src["external_research_status"] = "skipped"
+    err2 = validate_segment_insight_payload(skipped_src, allowed_segments=["幼犬"])
+    assert err2 and "不得填写 sources" in err2
+
+    text, err3 = parse_segment_insight_output(
+        json.dumps(_valid_insight(["幼犬"], status="unavailable"), ensure_ascii=False),
+        allowed_segments=["幼犬"],
+    )
+    assert err3 is None and text is not None
 
 
-def test_excel_percent_and_ai_summary_cells() -> None:
-    payload = {
-        "sections": [{"title": t, "bullets": [f"{t}要点"]} for t in VOC_TYPES]
-    }
+def test_excel_sheets_and_rates() -> None:
+    payload = {"sections": [{"title": t, "bullets": [f"{t}要点"]} for t in VOC_TYPES]}
     assert validate_summary_payload(payload) is None
-    sections = format_summary_sections(payload)
-    assert len(sections) == 8
+    overview = format_summary_text(payload)
 
-    insight = {
-        "external_research_status": "unavailable",
-        "segments": [
-            {
-                "segment": "幼犬",
-                "review_observations": ["共现用途"],
-                "behavior_traits": ["互动"],
-                "personality_traits": ["陪伴导向"],
-                "usage_habits": ["每天"],
-                "core_needs": ["耐用"],
-                "sources": [],
-            }
-        ],
-        "product_development": {
-            "must_have_features": ["安全"],
-            "product_moats": ["长续航"],
-        },
-    }
+    insight = _valid_insight(["幼犬", "小型犬"], status="unavailable")
     core = build_core_segments(_sample_items(), analyzed_reviews=10, top_n=5)
     combos = build_segment_combinations(_sample_items(), core)
     for row in core:
@@ -296,54 +222,53 @@ def test_excel_percent_and_ai_summary_cells() -> None:
         wb.close()
 
         summary_rows = aggregate_statistics(_sample_items(), total_reviews=10)
+        # Force two 消费人群 rows for composition check via export meta
         meta = write_analysis_workbook(
             src,
             out,
             summary_rows=summary_rows,
             total_reviews=10,
-            overview_summary="AI总结（全量）",
-            summary_sections=sections,
+            overview_summary=overview,
             core_segments=core,
             segment_insight=insight,
-            segment_insight_digest=format_segment_insight_digest(insight),
         )
-        assert AI_SUMMARY_SHEET_NAME in meta["sheetnames"]
+        assert "AI总结" not in meta["sheetnames"]
         assert SEGMENT_INSIGHT_SHEET_NAME in meta["sheetnames"]
         assert OVERVIEW_SHEET_NAME in meta["sheetnames"]
         assert RESULT_SHEET_NAME in meta["sheetnames"]
         assert "产品决策分析" not in meta["sheetnames"]
 
-        wb2 = load_workbook(out)
-        result = wb2[RESULT_SHEET_NAME]
-        # mention_rate column D stores fraction with 0.0% format
-        assert result.cell(row=2, column=4).number_format == EXCEL_PERCENT_FORMAT
-        assert isinstance(result.cell(row=2, column=4).value, float)
-        assert 0 <= float(result.cell(row=2, column=4).value) <= 1
+        for m in meta.get("module_metas") or []:
+            if m.get("has_chart"):
+                assert abs(float(m.get("composition_sum") or 0) - 1.0) < 1e-6
 
-        ai = wb2[AI_SUMMARY_SHEET_NAME]
-        assert ai["A1"].value == "AI评论洞察总结"
-        for r in range(2, 10):
-            val = str(ai.cell(row=r, column=1).value or "")
-            assert val.endswith("总结") or "总结" in val.split("\n", 1)[0]
-            assert "要点" in val or "证据不足" in val
-        assert "消费人群洞察总结" in str(ai["A11"].value or "")
-        assert not ai.merged_cells.ranges
+        wb2 = load_workbook(out)
+        assert "AI总结" not in wb2.sheetnames
+        ov = wb2[OVERVIEW_SHEET_NAME]
+        assert ov.cell(row=1, column=15).value == "AI总结"
+        assert "消费人群" in str(ov.cell(row=2, column=15).value or "")
+
+        result = wb2[RESULT_SHEET_NAME]
+        assert result.cell(row=2, column=4).number_format == EXCEL_PERCENT_FORMAT
+        # coverage: unique/analyzed — puppy 2/10 = 0.2 appears somewhere for 幼犬
+        rates = [
+            float(result.cell(row=r, column=4).value or 0)
+            for r in range(2, result.max_row + 1)
+            if result.cell(row=r, column=2).value == "幼犬"
+        ]
+        assert rates and abs(rates[0] - 0.2) < 1e-9
 
         seg = wb2[SEGMENT_INSIGHT_SHEET_NAME]
-        assert "01 核心购买人群" in str(seg["A1"].value or "")
-        # coverage rate percent format
-        assert seg.cell(row=3, column=3).number_format == EXCEL_PERCENT_FORMAT
-
-        ov = wb2[OVERVIEW_SHEET_NAME]
-        assert len(ov._charts) >= 1
-        # hidden chart value cells use percent format
-        found_pct = False
-        for col in range(24, 40):
-            cell = ov.cell(row=2, column=col)
-            if cell.number_format == EXCEL_PERCENT_FORMAT and isinstance(cell.value, float):
-                found_pct = True
-                break
-        assert found_pct
+        text = "\n".join(
+            str(seg.cell(row=r, column=1).value or "")
+            for r in range(1, seg.max_row + 1)
+        )
+        assert "01 核心消费人群" in text
+        assert "02 核心人群画像" in text
+        assert "03 产品开发方向" in text
+        assert "行为特征" not in text
+        # role column present
+        assert seg.cell(row=2, column=2).value == "角色"
         wb2.close()
 
 

@@ -90,24 +90,40 @@ def fake_summary() -> dict:
 
 def fake_segment_insight(allowed: list[str]) -> dict:
     segments = []
-    for name in allowed:
+    for i, name in enumerate(allowed):
+        role = "最终使用者" if i == 0 else "购买决策者"
         segments.append(
             {
                 "segment": name,
-                "review_observations": [f"{name}在评论中与用途/场景共现"],
-                "behavior_traits": [f"{name}倾向高频互动"],
-                "personality_traits": [f"{name}重视陪伴体验"],
-                "usage_habits": [f"{name}日常反复使用"],
+                "role": role,
+                "review_findings": [f"{name}在评论中与用途/场景共现"],
+                "ai_profile": [f"{name}倾向高频互动，重视陪伴体验（联网不可用，暂据评论归纳）"],
                 "core_needs": [f"{name}需要耐用与安全"],
                 "sources": [],
             }
         )
+    targets = allowed[:2] if allowed else []
     return {
         "external_research_status": "unavailable",
         "segments": segments,
         "product_development": {
-            "must_have_features": ["耐用结构", "安全材料"],
-            "product_moats": ["针对核心人群的长续航稳定体验"],
+            "requirements": [
+                {
+                    "requirement": "耐用结构",
+                    "target_segments": targets or ["（无）"],
+                    "basis": "评论多次提到耐用与损坏风险",
+                }
+            ]
+            if targets
+            else [],
+            "product_moats": [
+                {
+                    "moat": "针对核心人群的长续航稳定体验",
+                    "reason": "评论高频使用场景需要持续稳定，普通功能堆砌难形成差异",
+                }
+            ]
+            if targets
+            else [],
         },
     }
 

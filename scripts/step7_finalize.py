@@ -12,13 +12,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.excel_io import write_analysis_workbook
 from lib.io_util import read_json, write_json
-from lib.segment_insight_codec import (
-    format_segment_insight_digest,
-    parse_segment_insight_output,
-)
+from lib.segment_insight_codec import parse_segment_insight_output
 from lib.segment_stats import analyzed_review_count, build_segment_stats_payload
 from lib.statistics import aggregate_statistics
-from lib.summary_codec import format_summary_sections, format_summary_text, parse_summary_payload
+from lib.summary_codec import format_summary_text, parse_summary_payload
+
+
+def _empty_segment_payload() -> dict:
+    return {
+        "external_research_status": "skipped",
+        "segments": [],
+        "product_development": {"requirements": [], "product_moats": []},
+    }
 
 
 def main() -> int:
@@ -61,7 +66,6 @@ def main() -> int:
     write_json(workdir / "summary.json", summary_rows)
 
     overview_text = ""
-    summary_sections: list[dict] = []
     sdir = workdir / "overview_summary"
     raw_path = sdir / "MODEL_OUTPUT.json"
     if raw_path.exists():
@@ -70,16 +74,11 @@ def main() -> int:
         if err:
             if args.allow_empty_summary and ("尚未填写" in err or raw.strip().startswith("/*")):
                 overview_text = ""
-                summary_sections = []
             else:
                 raise SystemExit(f"AI 总结校验失败：{err}")
         else:
             overview_text = format_summary_text(payload or {})
-            summary_sections = format_summary_sections(payload or {})
-            write_json(
-                workdir / "overview_summary.json",
-                {"summary_text": overview_text, "sections": summary_sections},
-            )
+            write_json(workdir / "overview_summary.json", {"summary_text": overview_text})
     elif not args.allow_empty_summary:
         raise SystemExit(
             "缺少 overview_summary/MODEL_OUTPUT.json；"
@@ -96,7 +95,6 @@ def main() -> int:
     allowed = [s.get("segment") for s in core_segments if s.get("segment")]
 
     segment_payload: dict | None = None
-    segment_digest = ""
     seg_dir = workdir / "consumer_segment_insight"
     seg_raw_path = seg_dir / "MODEL_OUTPUT.json"
     if seg_raw_path.exists():
@@ -106,11 +104,7 @@ def main() -> int:
             if args.allow_empty_segment_insight and (
                 "尚未填写" in err or raw.strip().startswith("/*")
             ):
-                segment_payload = {
-                    "external_research_status": "skipped",
-                    "segments": [],
-                    "product_development": {"must_have_features": [], "product_moats": []},
-                }
+                segment_payload = _empty_segment_payload()
             else:
                 raise SystemExit(f"消费人群洞察校验失败：{err}")
         else:
@@ -122,13 +116,7 @@ def main() -> int:
             "请先运行 step6b_prepare_segment_insight.py，或加 --allow-empty-segment-insight"
         )
     else:
-        segment_payload = {
-            "external_research_status": "skipped",
-            "segments": [],
-            "product_development": {"must_have_features": [], "product_moats": []},
-        }
-
-    segment_digest = format_segment_insight_digest(segment_payload or {})
+        segment_payload = _empty_segment_payload()
 
     out = Path(args.output).resolve() if args.output else workdir / "评论洞察分析结果.xlsx"
     excel_meta = write_analysis_workbook(
@@ -138,10 +126,8 @@ def main() -> int:
         total_reviews=total_reviews,
         voc_items=len(items),
         overview_summary=overview_text,
-        summary_sections=summary_sections,
         core_segments=core_segments,
         segment_insight=segment_payload,
-        segment_insight_digest=segment_digest,
     )
 
     result = {

@@ -12,7 +12,6 @@ from openpyxl import Workbook, load_workbook
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.constants import (
-    AI_SUMMARY_SHEET_NAME,
     EXCEL_PERCENT_FORMAT,
     OVERVIEW_CHART_TYPES,
     OVERVIEW_SHEET_NAME,
@@ -22,7 +21,7 @@ from lib.constants import (
 )
 from lib.excel_io import PORTRAIT_TYPES, type_display_label, write_analysis_workbook
 from lib.statistics import build_theme_insight_summary
-from lib.summary_codec import format_summary_sections, format_summary_text, validate_summary_payload
+from lib.summary_codec import format_summary_text, validate_summary_payload
 
 
 def _row(item_type, dimension, count, rate, feedback):
@@ -69,15 +68,6 @@ def _sample_summary_text():
     return format_summary_text(payload)
 
 
-def _sample_summary_sections():
-    payload = {
-        "sections": [
-            {"title": t, "bullets": [f"{t}要点一", f"{t}要点二"]} for t in VOC_TYPES
-        ]
-    }
-    return format_summary_sections(payload)
-
-
 def _write_source(path: Path) -> None:
     wb = Workbook()
     wb.active.title = "Reviews"
@@ -103,13 +93,15 @@ def test_dashboard_full() -> None:
             total_reviews=100,
             voc_items=40,
             overview_summary=summary_text,
-            summary_sections=_sample_summary_sections(),
         )
         assert meta["chart_count"] == 4
         assert meta.get("has_overview_summary") is True
         assert str(meta.get("summary_reserve", "")).startswith("O1:U")
-        assert AI_SUMMARY_SHEET_NAME in meta["sheetnames"]
+        assert "AI总结" not in meta["sheetnames"]
         assert SEGMENT_INSIGHT_SHEET_NAME in meta["sheetnames"]
+        for m in meta.get("module_metas") or []:
+            if m.get("has_chart"):
+                assert abs(float(m.get("composition_sum") or 0) - 1.0) < 1e-6
 
         wb = load_workbook(out)
         ov = wb[OVERVIEW_SHEET_NAME]
@@ -119,11 +111,7 @@ def test_dashboard_full() -> None:
         body = str(ov.cell(row=2, column=15).value or "")
         assert "消费人群" in body and "未被满足" in body
         assert "产品名称" not in body
-
-        ai = wb[AI_SUMMARY_SHEET_NAME]
-        assert ai["A1"].value == "AI评论洞察总结"
-        assert not ai.merged_cells.ranges
-        assert "消费人群总结" in str(ai["A2"].value or "")
+        assert "AI总结" not in wb.sheetnames
 
         rs = wb[RESULT_SHEET_NAME]
         assert rs.cell(row=2, column=4).number_format == EXCEL_PERCENT_FORMAT

@@ -93,14 +93,15 @@ def build_segment_combinations(
     top_n: int = SEGMENT_COMBO_TOP_N,
 ) -> dict[str, list[str]]:
     """
-    For each core segment, high-frequency co-occurring 消费人群 tags
-    that truly appear in the same review_row. Labels like \"幼犬 + 小型犬\".
+    Unordered co-occurrence pairs among 消费人群 tags in the same review_row.
+    Labels are globally deduped as \"A + B（N条）\" (sorted names), attached to
+    each involved core segment.
     """
     core_names = [str(s.get("segment") or "") for s in (core_segments or []) if s.get("segment")]
     if not core_names:
         return {}
+    core_set = set(core_names)
 
-    # review_row -> set of 消费人群 dims
     by_review: dict[int, set[str]] = defaultdict(set)
     for it in items or []:
         if _type(it) != SEGMENT_TYPE:
@@ -113,7 +114,6 @@ def build_segment_combinations(
             continue
         by_review[rid].add(dim)
 
-    # pair counts (unordered)
     pair_counts: dict[tuple[str, str], int] = defaultdict(int)
     for dims in by_review.values():
         if len(dims) < 2:
@@ -122,16 +122,32 @@ def build_segment_combinations(
             pair_counts[(a, b)] += 1
 
     out: dict[str, list[str]] = {name: [] for name in core_names}
+    scored_by_seg: dict[str, list[tuple[int, str]]] = {name: [] for name in core_names}
+    for (a, b), cnt in pair_counts.items():
+        if cnt <= 0:
+            continue
+        # Only keep pairs that touch at least one core segment
+        if a not in core_set and b not in core_set:
+            continue
+        label = f"{a} + {b}（{cnt}条）"
+        for name in (a, b):
+            if name in scored_by_seg:
+                scored_by_seg[name].append((cnt, label))
+
     for name in core_names:
-        scored: list[tuple[int, str]] = []
-        for (a, b), cnt in pair_counts.items():
-            if name not in (a, b) or cnt <= 0:
-                continue
-            other = b if a == name else a
-            label = f"{name} + {other}"
-            scored.append((cnt, label))
+        scored = scored_by_seg[name]
         scored.sort(key=lambda x: (-x[0], x[1]))
-        out[name] = [lab for _, lab in scored[: max(0, int(top_n or 0))]]
+        # Dedup labels within a segment (same unordered pair appears once)
+        seen: set[str] = set()
+        labels: list[str] = []
+        for _, lab in scored:
+            if lab in seen:
+                continue
+            seen.add(lab)
+            labels.append(lab)
+            if len(labels) >= max(0, int(top_n or 0)):
+                break
+        out[name] = labels
     return out
 
 

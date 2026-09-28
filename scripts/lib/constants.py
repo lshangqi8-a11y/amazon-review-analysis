@@ -40,7 +40,6 @@ EXTRACT_CHUNK_LIMIT = 50
 REPRESENTATIVE_FEEDBACK_LIMIT = 5
 OVERVIEW_SHEET_NAME = "评论分析总览"
 RESULT_SHEET_NAME = "评论分析结果"
-AI_SUMMARY_SHEET_NAME = "AI总结"
 SEGMENT_INSIGHT_SHEET_NAME = "消费人群洞察"
 
 # Excel percentage display (true percent values, e.g. 0.194 → 19.4%)
@@ -99,8 +98,8 @@ SEGMENT_RELATED_TOP_N = 5
 ANALYSIS_SHEET_NAMES = (
     OVERVIEW_SHEET_NAME,
     RESULT_SHEET_NAME,
-    AI_SUMMARY_SHEET_NAME,
     SEGMENT_INSIGHT_SHEET_NAME,
+    "AI总结",  # legacy V6 sheet — remove if present
     "VOC分析结果",
     "VOC评论明细",
 )

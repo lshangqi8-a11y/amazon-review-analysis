@@ -45,6 +45,54 @@ def _as_sources(value, *, field: str) -> tuple[list[dict] | None, str | None]:
     return out, None
 
 
+def _as_requirements(value, *, field: str) -> tuple[list[dict] | None, str | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list):
+        return None, f"{field} 必须是数组"
+    out: list[dict] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, dict):
+            return None, f"{field}[{i}] 必须是对象"
+        req = str(item.get("requirement") or "").strip()
+        basis = str(item.get("basis") or "").strip()
+        targets, err = _as_str_list(
+            item.get("target_segments"),
+            field=f"{field}[{i}].target_segments",
+        )
+        if err:
+            return None, err
+        if not req or not basis:
+            return None, f"{field}[{i}] 需要非空的 requirement 与 basis"
+        if not targets:
+            return None, f"{field}[{i}].target_segments 不能为空"
+        out.append(
+            {
+                "requirement": req,
+                "target_segments": targets,
+                "basis": basis,
+            }
+        )
+    return out, None
+
+
+def _as_moats(value, *, field: str) -> tuple[list[dict] | None, str | None]:
+    if value is None:
+        return [], None
+    if not isinstance(value, list):
+        return None, f"{field} 必须是数组"
+    out: list[dict] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, dict):
+            return None, f"{field}[{i}] 必须是对象"
+        moat = str(item.get("moat") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        if not moat or not reason:
+            return None, f"{field}[{i}] 需要非空的 moat 与 reason"
+        out.append({"moat": moat, "reason": reason})
+    return out, None
+
+
 def validate_segment_insight_payload(
     payload: dict,
     *,
@@ -61,8 +109,6 @@ def validate_segment_insight_payload(
     if not isinstance(segments, list):
         return "segments 必须是数组"
 
-    # When allowed_segments is provided (incl. []), every segment must be in it.
-    # allowed_segments=[] ⇒ segments must be empty.
     enforce_allowlist = allowed_segments is not None
     allowed = (
         {str(s).strip() for s in allowed_segments if str(s).strip()}
@@ -82,13 +128,12 @@ def validate_segment_insight_payload(
             return f"重复人群：{name}"
         seen.add(name)
 
-        for field in (
-            "review_observations",
-            "behavior_traits",
-            "personality_traits",
-            "usage_habits",
-            "core_needs",
-        ):
+        role = str(seg.get("role") or "").strip()
+        if not role:
+            return f"segments[{i}].role 不能为空"
+        seg["role"] = role
+
+        for field in ("review_findings", "ai_profile", "core_needs"):
             vals, err = _as_str_list(seg.get(field), field=f"segments[{i}].{field}")
             if err:
                 return err
@@ -107,58 +152,30 @@ def validate_segment_insight_payload(
     pd = payload.get("product_development")
     if not isinstance(pd, dict):
         return "product_development 必须是对象"
-    for field in ("must_have_features", "product_moats"):
-        vals, err = _as_str_list(pd.get(field), field=f"product_development.{field}")
-        if err:
-            return err
-        pd[field] = vals
+
+    requirements, err = _as_requirements(
+        pd.get("requirements"), field="product_development.requirements"
+    )
+    if err:
+        return err
+    if enforce_allowlist and allowed is not None:
+        for i, req in enumerate(requirements):
+            for t in req["target_segments"]:
+                if t not in allowed:
+                    return (
+                        f"product_development.requirements[{i}].target_segments "
+                        f"含未知人群：{t}"
+                    )
+    pd["requirements"] = requirements
+
+    moats, err = _as_moats(pd.get("product_moats"), field="product_development.product_moats")
+    if err:
+        return err
+    pd["product_moats"] = moats
 
     if not segments and status == "ok":
         return "无核心人群时 external_research_status 不能为 ok"
     return None
-
-
-def format_segment_insight_digest(payload: dict) -> str:
-    """Plain-text digest for AI总结 Sheet cell A11."""
-    if not isinstance(payload, dict):
-        return ""
-    lines: list[str] = ["消费人群洞察总结", ""]
-    segments = payload.get("segments") or []
-    if not segments:
-        lines.append("· 未识别到足够的消费人群证据，从略")
-        return "\n".join(lines).strip()
-
-    lines.append("【谁在买】")
-    for seg in segments:
-        name = str(seg.get("segment") or "").strip()
-        obs = seg.get("review_observations") or []
-        head = obs[0] if obs else "见评论表现"
-        lines.append(f"· {name}：{head}")
-
-    lines.append("")
-    lines.append("【这些人是什么样的人】")
-    for seg in segments:
-        name = str(seg.get("segment") or "").strip()
-        traits = (seg.get("behavior_traits") or [])[:2]
-        needs = (seg.get("core_needs") or [])[:2]
-        bits = traits + needs
-        if bits:
-            lines.append(f"· {name}：{'；'.join(bits)}")
-        else:
-            lines.append(f"· {name}：证据有限")
-
-    pd = payload.get("product_development") or {}
-    features = pd.get("must_have_features") or []
-    moats = pd.get("product_moats") or []
-    lines.append("")
-    lines.append("【产品应该怎么做】")
-    if features:
-        lines.append("必须具备：" + "；".join(features[:5]))
-    if moats:
-        lines.append("应建壁垒：" + "；".join(moats[:5]))
-    if not features and not moats:
-        lines.append("· 产品开发方向证据不足，从略")
-    return "\n".join(lines).strip()
 
 
 def parse_segment_insight_output(
