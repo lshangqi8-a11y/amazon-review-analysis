@@ -35,6 +35,47 @@ def build_stats_block(summary_rows: list[dict], *, top_n: int = 8) -> str:
     return "\n".join(lines).strip()
 
 
+def format_section_cell_text(title: str, bullets: list | None) -> str:
+    """One copyable module cell for the AI总结 sheet."""
+    t = str(title or "").strip()
+    lines: list[str] = [f"{t}总结"]
+    if not isinstance(bullets, list) or not bullets:
+        lines.append("· 证据不足，从略")
+        return "\n".join(lines)
+    for b in bullets:
+        text = str(b or "").strip()
+        if text:
+            lines.append(f"· {text}")
+    if len(lines) == 1:
+        lines.append("· 证据不足，从略")
+    return "\n".join(lines)
+
+
+def format_summary_sections(payload: dict) -> list[dict]:
+    """Ordered [{title, cell_text}] for AI总结 sheet (八维)."""
+    sections = payload.get("sections") if isinstance(payload, dict) else None
+    if not isinstance(sections, list):
+        return []
+    by_title: dict[str, list] = {}
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        title = str(sec.get("title") or "").strip()
+        if title not in _ALLOWED_TITLES:
+            continue
+        by_title[title] = sec.get("bullets") or []
+    out: list[dict] = []
+    for t in VOC_TYPES:
+        bullets = by_title.get(t)
+        out.append(
+            {
+                "title": t,
+                "cell_text": format_section_cell_text(t, bullets if bullets is not None else []),
+            }
+        )
+    return out
+
+
 def format_summary_text(payload: dict) -> str:
     sections = payload.get("sections") if isinstance(payload, dict) else None
     if not isinstance(sections, list):
@@ -91,6 +132,14 @@ def parse_summary_output(raw_text: str) -> tuple[str | None, str | None]:
     """
     Returns (summary_text, error).
     """
+    payload, err = parse_summary_payload(raw_text)
+    if err:
+        return None, err
+    return format_summary_text(payload or {}), None
+
+
+def parse_summary_payload(raw_text: str) -> tuple[dict | None, str | None]:
+    """Returns (validated payload, error)."""
     text = (raw_text or "").strip()
     if not text or text.startswith("/*"):
         return None, "总结模型输出尚未填写"
@@ -100,4 +149,4 @@ def parse_summary_output(raw_text: str) -> tuple[str | None, str | None]:
     err = validate_summary_payload(payload)
     if err:
         return None, err
-    return format_summary_text(payload), None
+    return payload, None

@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Optional local smoke: fake AI outputs through the V4 7-step pipeline.
+Optional local smoke: fake AI outputs through the V6 pipeline.
 
-Requires explicit paths (no machine-specific defaults):
-
-  python scripts/_e2e_fake.py --input reviews.xlsx --workdir ./tmp_v4_e2e --output ./out.xlsx --force
+  python scripts/_e2e_fake.py --input reviews.xlsx --workdir ./tmp_v6_e2e --output ./out.xlsx --force
 """
 from __future__ import annotations
 
@@ -26,6 +24,10 @@ def fake_persona(reviews):
         items = []
         if any(k in low for k in ["puppy", "pup", "幼"]):
             items.append({"类型": "消费人群", "原始维度": "幼犬", "单条提炼": "评论提到幼犬"})
+        if any(k in low for k in ["small dog", "小型", "small breed"]):
+            items.append({"类型": "消费人群", "原始维度": "小型犬", "单条提炼": "评论提到小型犬"})
+        if any(k in low for k in ["multi", "多犬", "two dog", "dogs"]):
+            items.append({"类型": "消费人群", "原始维度": "多犬家庭", "单条提炼": "多犬家庭"})
         if any(k in low for k in ["yard", "outdoor", "庭院", "户外", "outside", "kitchen"]):
             items.append({"类型": "使用地点", "原始维度": "户外-庭院", "单条提炼": "在户外使用"})
         if any(k in low for k in ["everyday", "daily", "每天", "night", "nightly"]):
@@ -55,7 +57,6 @@ def fake_fulfill(reviews):
 
 
 def fake_normalize(expected_pairs: list[dict]) -> dict:
-    """Identity mapping (enough to exercise normalize → finalize)."""
     return {
         "mappings": [
             {
@@ -69,7 +70,6 @@ def fake_normalize(expected_pairs: list[dict]) -> dict:
 
 
 def fake_summary() -> dict:
-    """Fake Pass4 eight-dim overview summary (must cover all 8 sections)."""
     titles = [
         "消费人群",
         "使用地点",
@@ -88,8 +88,32 @@ def fake_summary() -> dict:
     }
 
 
+def fake_segment_insight(allowed: list[str]) -> dict:
+    segments = []
+    for name in allowed:
+        segments.append(
+            {
+                "segment": name,
+                "review_observations": [f"{name}在评论中与用途/场景共现"],
+                "behavior_traits": [f"{name}倾向高频互动"],
+                "personality_traits": [f"{name}重视陪伴体验"],
+                "usage_habits": [f"{name}日常反复使用"],
+                "core_needs": [f"{name}需要耐用与安全"],
+                "sources": [],
+            }
+        )
+    return {
+        "external_research_status": "unavailable",
+        "segments": segments,
+        "product_development": {
+            "must_have_features": ["耐用结构", "安全材料"],
+            "product_moats": ["针对核心人群的长续航稳定体验"],
+        },
+    }
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="V4 fake-AI end-to-end smoke (local only)")
+    parser = argparse.ArgumentParser(description="V6 fake-AI end-to-end smoke (local only)")
     parser.add_argument("--input", required=True, help="Source reviews xlsx")
     parser.add_argument("--workdir", required=True, help="Working directory for batches")
     parser.add_argument("--output", required=True, help="Output analysis xlsx")
@@ -115,7 +139,7 @@ def main() -> int:
     subprocess.run(cmd1, check=True)
 
     meta = json.loads((wd / "meta.json").read_text(encoding="utf-8"))
-    assert meta.get("skill_version") == "v4"
+    assert meta.get("skill_version") == "v6"
     for b in meta["persona_batches"]:
         bdir = wd / b["path"]
         exp = json.loads((bdir / "expected_ids.json").read_text(encoding="utf-8"))
@@ -161,6 +185,25 @@ def main() -> int:
     sdir = wd / "overview_summary"
     (sdir / "MODEL_OUTPUT.json").write_text(
         json.dumps(fake_summary(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/step6b_prepare_segment_insight.py"),
+            "--workdir",
+            str(wd),
+            "--network-capability",
+            "offline",
+        ],
+        check=True,
+    )
+    seg_meta = json.loads(
+        (wd / "consumer_segment_insight" / "input_meta.json").read_text(encoding="utf-8")
+    )
+    allowed = list(seg_meta.get("allowed_segments") or [])
+    (wd / "consumer_segment_insight" / "MODEL_OUTPUT.json").write_text(
+        json.dumps(fake_segment_insight(allowed), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     subprocess.run(

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-V4 Step 1: read Excel → write persona_batches + fulfillment_batches for dual-pass AI.
+V6 Step 1: read Excel → write persona_batches + fulfillment_batches for dual-pass AI.
 """
 from __future__ import annotations
 
@@ -187,8 +187,8 @@ def main() -> int:
     write_json(
         workdir / "meta.json",
         {
-            "skill_version": "v4",
-            "pipeline": "dual_pass_8dim",
+            "skill_version": "v6",
+            "pipeline": "dual_pass_8dim_segment_insight",
             "input_file": str(input_path),
             "sheet_name": sheet,
             "title_column": title_col,
@@ -199,6 +199,7 @@ def main() -> int:
             "product_category_source": ("cli" if cli_cat else ("excel" if auto_cat else "empty")),
             "total_reviews": len(reviews),
             "ai_reviews": len(ai_reviews),
+            "analyzed_reviews": len(ai_reviews),
             "empty_reviews": len(reviews) - len(ai_reviews),
             "chunk_size": chunk_size,
             "persona_batches": persona_batches,
@@ -208,7 +209,7 @@ def main() -> int:
     write_json(workdir / "reviews.json", reviews)
 
     print(f"workdir={workdir}")
-    print(f"skill_version=v4 total_reviews={len(reviews)} ai_reviews={len(ai_reviews)}")
+    print(f"skill_version=v6 total_reviews={len(reviews)} ai_reviews={len(ai_reviews)}")
     print(f"persona_batches={len(persona_batches)} fulfillment_batches={len(fulfillment_batches)}")
     print("NEXT: Fill persona_batches/*/MODEL_OUTPUT.json (Pass1 画像六维)")
     print("THEN: python scripts/step2_ingest_persona.py --workdir ...")
@@ -217,6 +218,7 @@ def main() -> int:
     print("THEN: python scripts/step4_prepare_normalize.py --workdir ...")
     print("THEN: Fill normalize_batches/*/MODEL_OUTPUT.json → step5_ingest_normalize.py")
     print("THEN: python scripts/step6_prepare_summary.py → Fill overview_summary/MODEL_OUTPUT.json")
+    print("THEN: python scripts/step6b_prepare_segment_insight.py → Fill consumer_segment_insight/MODEL_OUTPUT.json")
     print("THEN: python scripts/step7_finalize.py --workdir ... --output ...")
     return 0
 

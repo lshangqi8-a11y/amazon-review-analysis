@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Portable constants for Amazon review analysis V4 (8 dimensions)."""
+"""Portable constants for Amazon review analysis V6 (V4 core + segment insight)."""
 from __future__ import annotations
 
 # Pass1 — consumer persona (6)
@@ -40,6 +40,11 @@ EXTRACT_CHUNK_LIMIT = 50
 REPRESENTATIVE_FEEDBACK_LIMIT = 5
 OVERVIEW_SHEET_NAME = "评论分析总览"
 RESULT_SHEET_NAME = "评论分析结果"
+AI_SUMMARY_SHEET_NAME = "AI总结"
+SEGMENT_INSIGHT_SHEET_NAME = "消费人群洞察"
+
+# Excel percentage display (true percent values, e.g. 0.194 → 19.4%)
+EXCEL_PERCENT_FORMAT = "0.0%"
 
 # Overview charts/panels: cap bars for reviewability after AI normalize
 OVERVIEW_TOP_N = {
@@ -60,7 +65,7 @@ LABEL_MIN_RATE = 0.6
 LABEL_KEEP_TOP = 8
 LABEL_OTHER = "其他（低频）"
 
-# Identity map kept for API compatibility (V4 types are already display names)
+# Identity map kept for API compatibility (types are already display names)
 TYPE_DISPLAY_LABELS: dict[str, str] = {}
 
 # Short blurbs only — no chart-formula jargon on the dashboard
@@ -78,9 +83,24 @@ MODULE_DESCRIPTIONS = {
 NEED_FULFILLMENT_SECTION_DESC = "正面与负面体验及提及占比，支撑优势确认与改进落地。"
 CONTEXT_SECTION_DESC = "地点与时刻分列展示，便于对照原文审计（完整条目见「评论分析结果」）。"
 
+# Consumer segment insight (V6)
+SEGMENT_TYPE = "消费人群"
+SEGMENT_TOP_N = 5
+SEGMENT_RELATED_TYPES = [
+    "产品用途",
+    "使用场景",
+    "购买动机",
+    "用户满意",
+    "未被满足",
+]
+SEGMENT_COMBO_TOP_N = 5
+SEGMENT_RELATED_TOP_N = 5
+
 ANALYSIS_SHEET_NAMES = (
     OVERVIEW_SHEET_NAME,
     RESULT_SHEET_NAME,
+    AI_SUMMARY_SHEET_NAME,
+    SEGMENT_INSIGHT_SHEET_NAME,
     "VOC分析结果",
     "VOC评论明细",
 )

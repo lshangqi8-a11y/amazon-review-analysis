@@ -1,13 +1,16 @@
-# Amazon 评论分析 V4
+# Amazon 评论分析 V6
 
-WorkBuddy / Cursor 可用的独立技能包：**8 维双轮抽取 → AI 维度归一 → 一次全量 AI 总结**。  
-总览左图右文；不要求产品名称/类目。
+WorkBuddy / Cursor 可用的独立技能包：  
+**V4 八维双轮抽取 → AI 维度归一 → AI 总结 + 消费人群洞察 → Excel**。
+
+在 V4 稳定分析之上，优化百分比展示与 AI 总结复制体验，并新增「消费人群洞察」模块。  
+不要求产品名称/类目。不含 V5 产品决策分析。
 
 ## 快速开始
 
-1. 下载或 clone 本仓库，将根目录作为 `SKILL_ROOT`
+1. 下载或 clone 本仓库（建议 tag `v6.0.0`），将根目录作为 `SKILL_ROOT`
 2. `pip install -r requirements.txt`
-3. 按 [SKILL.md](SKILL.md) 的 7 步流程执行（Agent 串行填写各批 `MODEL_OUTPUT.json`）
+3. 按 [SKILL.md](SKILL.md) 流程执行（Agent 串行填写各批 `MODEL_OUTPUT.json`）
 
 ## 版本
 

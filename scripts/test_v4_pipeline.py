@@ -112,7 +112,7 @@ def test_workdir_refuse_unknown_nonempty() -> None:
         (ours / "meta.json").write_text(
             json.dumps(
                 {
-                    "skill_version": "v4",
+                    "skill_version": "v6",
                     "pipeline": "dual_pass_8dim",
                     "persona_batches": [],
                 }

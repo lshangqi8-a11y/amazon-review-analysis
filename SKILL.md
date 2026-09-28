@@ -1,16 +1,17 @@
 ---
-name: amazon-review-analysis-v4
+name: amazon-review-analysis-v6
 description: >-
-  Amazon review analysis V4: 8-dim dual-pass, AI dimension normalize, then
-  one-shot AI overview summary. Left charts/panels, right summary.
+  Amazon review analysis V6: V4 8-dim dual-pass + AI normalize + overview summary,
+  plus consumer segment insight (who buys / persona / product direction) with
+  optional web research. Excel percentages + copyable AI summary sheet.
   No product name/category required.
-  Use for 评论分析 V4 / 八维 / 维度归一 / AI总结 / 未被满足.
+  Use for 评论分析 V6 / 八维 / 维度归一 / 消费人群洞察 / AI总结.
 ---
 
-# Amazon 评论分析 V4
+# Amazon 评论分析 V6 — 消费人群洞察
 
-**八维双轮抽取 → AI 维度归一 → 一次全量 AI 总结**。  
-**不要求、不展示产品名称/类目**。版本见 `VERSION`。
+**V4 稳定主流程 + 百分比展示优化 + AI总结复制体验 + 一次消费人群洞察**。  
+不要求、不展示产品名称/类目。版本见 `VERSION`。
 
 将本仓库根目录作为 `SKILL_ROOT`（WorkBuddy / Cursor Skill 下载后的技能包路径）。
 
@@ -19,28 +20,46 @@ description: >-
 1. **禁止使用子代理 / 并行 Agent** 处理任何批次。全程仅由主会话串行执行：逐个批次「读 `user.md` → 写 `MODEL_OUTPUT.json`」。
 2. 中断后必须用 `--allow-partial` 续跑，**不得**开子代理补跑缺失批次。
 3. 抽取与归一都依赖同一会话串行统一标签；任何并行都会导致标签碎片化，一律视为执行错误。
+4. **不要引入 V5 产品决策分析**（属性表现 / 痛点优先级 / 产品机会 / 改进建议那套）。
+5. 消费人群洞察中的评论覆盖率由 Python 计算；AI 不得改数字、不得发明未知人群。
 
-## 八维
+## 八维（与 V4 相同，一级类型冻结）
 
 | 轮次 | 类型 |
 |------|------|
 | Pass1 画像 | 消费人群 · 使用地点 · 使用时刻 · 产品用途 · 使用场景 · 购买动机 |
 | Pass2 满足 | 用户满意 · **未被满足** |
-| Pass3 **归一** | 按类型将近义「原始维度」合并为「标准维度」（通用、偏合并） |
+| Pass3 **归一** | 按类型将近义「原始维度」合并为「标准维度」 |
 | Pass4 总结 | 基于归一后的 `summary.json` 一次生成八维总览文案 |
+| Pass5 人群洞察 | Python 核心人群统计 + **一次**消费人群洞察（可联网） |
 
-## 为何需要 AI 归一
+## 消费人群洞察（唯一新增业务模块）
 
-抽取阶段即使提示「同义复用」，跨批次仍易产生近义微标签。  
-**全局通用做法**：在统计出表前加一轮模型归一（按一级类型隔离、大胆合并），而不是维护品类同义词表。
+只回答：谁在买？这些人是什么样的人？产品应该怎么做？
 
-总览仍限制各维 Top N 柱图，避免审查页过载。
+1. **核心购买人群**（Python）：Top 5（不足则全出），评论数 / 评论覆盖率 / 高频组合画像  
+2. **核心人群画像洞察**（AI）：评论中表现 + 行为/性格/习惯/需求 + 外部来源  
+3. **产品开发方向**（AI）：必须具备的功能点 + 应建立的产品壁垒  
 
-## 总览布局
+### 联网研究（硬要求）
 
-- **左侧 A–N**：柱图（人群/用途/场景/动机）+ 地点|时刻列表 + 未被满足|满意列表  
-- **右侧 O–U**：AI总结（全量）  
-- 页眉仅「评论总数」
+当存在核心消费人群且运行环境**可联网**时：Agent **应主动**检索公开资料，填写 `sources`，`external_research_status=ok`。  
+外部知识不得修改评论统计。无联网时：`unavailable` 且不得伪造来源，主流程继续。
+
+## 百分比规则
+
+```text
+mention_rate / 评论覆盖率 = unique reviews / analyzed_reviews × 100%
+```
+
+Excel 中存真正的百分比数值（如 `0.194`），`number_format = 0.0%`，用户看到 `19.4%`。柱图 Y 轴与柱顶标签均为百分比。
+
+## Excel 结构
+
+1. 评论分析总览 — 左图右文（V4）
+2. 消费人群洞察 — 核心人群 / 画像 / 产品开发方向
+3. AI总结 — A2–A9 八维独立普通单元格 + A11 人群洞察总结（禁止 merged 正文）
+4. 评论分析结果 — 命中数审计
 
 ## 依赖
 
@@ -66,12 +85,16 @@ python "$SKILL_ROOT/scripts/step5_ingest_normalize.py" --workdir "$WORKDIR"
 
 python "$SKILL_ROOT/scripts/step6_prepare_summary.py" --workdir "$WORKDIR"
 # AI → overview_summary/MODEL_OUTPUT.json
+
+python "$SKILL_ROOT/scripts/step6b_prepare_segment_insight.py" --workdir "$WORKDIR"
+# AI → consumer_segment_insight/MODEL_OUTPUT.json（可联网则必须外部研究）
+
 python "$SKILL_ROOT/scripts/step7_finalize.py" --workdir "$WORKDIR" --output "评论洞察分析结果.xlsx"
 ```
 
 不要因缺少产品名称/类目而中断。JSON 错误不能当成功。
 
-重跑 `step4_prepare_normalize` / `step6_prepare_summary` 时，**已填写的 `MODEL_OUTPUT.json` 默认保留**；只有占位符会被刷新。若要强制清空重填，加 `--force-reset`。
+重跑 `step4_prepare_normalize` / `step6_prepare_summary` / `step6b_prepare_segment_insight` 时，**已填写的 `MODEL_OUTPUT.json` 默认保留**；强制清空加 `--force-reset`。
 
 ## 大批量与断点续跑
 
@@ -84,6 +107,7 @@ python "$SKILL_ROOT/scripts/step7_finalize.py" --workdir "$WORKDIR" --output "�
 ## 本地冒烟（可选）
 
 ```bash
-python "$SKILL_ROOT/scripts/_e2e_fake.py" --input reviews.xlsx --workdir ./tmp_v4_e2e --output ./out.xlsx --force
+python "$SKILL_ROOT/scripts/_e2e_fake.py" --input reviews.xlsx --workdir ./tmp_v6_e2e --output ./out.xlsx --force
 python "$SKILL_ROOT/scripts/test_v4_pipeline.py"
+python "$SKILL_ROOT/scripts/test_v6_pipeline.py"
 ```

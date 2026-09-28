@@ -101,6 +101,8 @@ def main() -> int:
     if preserved:
         print("preserved_model_output=yes (use --force-reset to discard)")
     print("NEXT: Fill overview_summary/MODEL_OUTPUT.json（基于归一后的八维汇总）")
+    print("THEN: python scripts/step6b_prepare_segment_insight.py --workdir ...")
+    print("THEN: Fill consumer_segment_insight/MODEL_OUTPUT.json")
     print("THEN: python scripts/step7_finalize.py --workdir ... --output ...")
     return 0
 
