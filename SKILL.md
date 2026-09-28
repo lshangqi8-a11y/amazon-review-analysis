@@ -15,6 +15,8 @@ description: >-
 
 将本仓库根目录作为 `SKILL_ROOT`（WorkBuddy / Cursor Skill 下载后的技能包路径）。
 
+**独立安装**：技能文件夹名应为 `amazon-review-analysis-v6`，与 V4 技能包并存；不要覆盖 V4 目录。版本见 `VERSION`（应为 `6.0.0`）。
+
 ## ⛔ 硬性约束（不可违反）
 
 1. **禁止使用子代理 / 并行 Agent** 处理任何批次。全程仅由主会话串行执行：逐个批次「读 `user.md` → 写 `MODEL_OUTPUT.json`」。
